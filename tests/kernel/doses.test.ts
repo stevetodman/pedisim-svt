@@ -121,3 +121,100 @@ describe('edge cases', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('boundary conditions', () => {
+  describe('weight extremes', () => {
+    it('calculates for minimum pediatric weight (3kg neonate)', () => {
+      const result = calculateDrugDose('ADENOSINE', 3);
+      expect(result?.calculatedDose).toBe(0.3); // 0.1 * 3 = 0.3mg
+    });
+
+    it('calculates for large pediatric patient (50kg)', () => {
+      const result = calculateDrugDose('ADENOSINE', 50);
+      expect(result?.calculatedDose).toBe(5); // 0.1 * 50 = 5mg (under cap)
+    });
+
+    it('calculates for adolescent at adult threshold (70kg)', () => {
+      const result = calculateDrugDose('ADENOSINE', 70);
+      expect(result?.calculatedDose).toBe(6); // 0.1 * 70 = 7mg, capped at 6mg
+    });
+
+    it('handles very small weight (1kg premature)', () => {
+      const result = calculateDrugDose('ADENOSINE', 1);
+      expect(result?.calculatedDose).toBe(0.1); // 0.1 * 1 = 0.1mg
+    });
+
+    it('handles fractional weight (15.7kg)', () => {
+      const result = calculateDrugDose('ADENOSINE', 15.7);
+      expect(result?.calculatedDose).toBeCloseTo(1.57, 2);
+    });
+  });
+
+  describe('dose cap boundaries', () => {
+    it('first dose caps at exactly 60kg (6mg)', () => {
+      const result = calculateDrugDose('ADENOSINE', 60);
+      expect(result?.calculatedDose).toBe(6);
+    });
+
+    it('second dose caps at exactly 60kg (12mg)', () => {
+      const result = calculateDrugDose('ADENOSINE_2', 60);
+      expect(result?.calculatedDose).toBe(12);
+    });
+
+    it('first dose just under cap (59kg)', () => {
+      const result = calculateDrugDose('ADENOSINE', 59);
+      expect(result?.calculatedDose).toBe(5.9); // Not capped
+    });
+
+    it('second dose just under cap (59kg)', () => {
+      const result = calculateDrugDose('ADENOSINE_2', 59);
+      expect(result?.calculatedDose).toBe(11.8); // Not capped
+    });
+  });
+
+  describe('cardioversion energy extremes', () => {
+    it('calculates initial energy for small child (5kg)', () => {
+      const result = calculateEnergy('CARDIOVERSION_SYNC', 5, 1);
+      // 0.5 * 5 = 2.5, but may be rounded up to practical value
+      expect(result?.calculatedDose).toBeGreaterThanOrEqual(2);
+      expect(result?.calculatedDose).toBeLessThanOrEqual(5);
+    });
+
+    it('calculates escalated energy for large child (40kg)', () => {
+      const result = calculateEnergy('CARDIOVERSION_SYNC', 40, 2);
+      expect(result?.calculatedDose).toBe(80); // 2 * 40
+    });
+
+    it('handles third attempt (same as second)', () => {
+      const result = calculateEnergy('CARDIOVERSION_SYNC', 18.5, 3);
+      expect(result?.calculatedDose).toBe(37); // Same as attempt 2
+    });
+  });
+});
+
+describe('accuracy evaluation edge cases', () => {
+  it('handles zero given dose', () => {
+    const result = evaluateDoseAccuracy('ADENOSINE', 0, 18.5);
+    expect(result.accuracy).toBe(0);
+  });
+
+  it('handles exactly double the correct dose', () => {
+    const result = evaluateDoseAccuracy('ADENOSINE', 3.7, 18.5);
+    expect(result.accuracy).toBe(2); // Exactly 2x
+  });
+
+  it('handles dose at max cap', () => {
+    const result = evaluateDoseAccuracy('ADENOSINE', 6, 18.5);
+    expect(result.accuracy).toBeGreaterThan(1); // Overdose but capped
+  });
+
+  it('handles very large overdose', () => {
+    const result = evaluateDoseAccuracy('ADENOSINE', 20, 18.5);
+    expect(result.accuracy).toBeGreaterThan(5);
+  });
+
+  it('evaluates second dose accuracy correctly', () => {
+    const result = evaluateDoseAccuracy('ADENOSINE_2', 3.7, 18.5);
+    expect(result.accuracy).toBe(1); // Exact correct second dose
+  });
+});
