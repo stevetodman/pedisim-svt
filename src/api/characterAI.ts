@@ -3,7 +3,7 @@
 // Unified interface for character responses - AI when available, scripted fallback
 // ============================================================================
 
-import { getAIConfig, isAIModeEnabled } from './aiConfig';
+import { getAIConfig, isAIModeEnabled, checkAIMode } from './aiConfig';
 import {
   DialogueRequest,
   DialogueResponse,
@@ -17,6 +17,9 @@ import {
 export async function getCharacterResponse(
   request: DialogueRequest
 ): Promise<DialogueResponse> {
+  // Ensure AI mode check is complete
+  await checkAIMode();
+
   // Use scripted responses if AI is not enabled
   if (!isAIModeEnabled()) {
     return generateScriptedResponse(request);
