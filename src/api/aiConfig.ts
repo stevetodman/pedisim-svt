@@ -50,6 +50,7 @@ export async function checkAIMode(): Promise<boolean> {
   // Create and store the promise
   checkPromise = (async () => {
     try {
+      console.log('[AIConfig] Making test request to /api/anthropic/v1/messages...');
       // Quick test to see if proxy is configured
       const response = await fetch('/api/anthropic/v1/messages', {
         method: 'POST',
@@ -60,10 +61,16 @@ export async function checkAIMode(): Promise<boolean> {
           messages: [{ role: 'user', content: 'hi' }]
         })
       });
-      console.log('[AIConfig] Proxy response status:', response.status);
+      console.log('[AIConfig] Proxy response status:', response.status, response.statusText);
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('[AIConfig] Response body:', text.substring(0, 500));
+      }
       aiModeEnabled = response.ok;
     } catch (error) {
-      console.error('[AIConfig] Proxy check failed:', error);
+      console.error('[AIConfig] Proxy check failed with error:', error);
+      console.error('[AIConfig] Error name:', (error as Error).name);
+      console.error('[AIConfig] Error message:', (error as Error).message);
       aiModeEnabled = false;
     }
 
