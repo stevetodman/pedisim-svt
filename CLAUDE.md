@@ -47,6 +47,8 @@ UI Layer (React)
 - `src/api/characterAI.ts` - Unified character response API with scripted fallback
 - `src/audio/index.ts` - Web Audio API procedural sounds (no audio files)
 - `src/App.tsx` - Main UI with inline ECGTrace, VitalsMonitor, DebriefPanel components
+- `src/kernel/ecg/` - ECG waveform generation kernel (morphology, measurements, waveform synthesis)
+- `src/components/ecg-viewer/` - MUSE-style 15-lead ECG viewer with calipers
 
 ### Prerequisites System
 
@@ -171,3 +173,50 @@ See `docs/DEBRIEF_DESIGN.md` for philosophy and `docs/IMPLEMENTATION_PLAN.md` fo
 **Orchestration Hook (`src/hooks/useDebrief.ts`):**
 - Coordinates evaluation engine + narrative generation
 - Manages debrief state and loading flow
+
+## ECG Viewer System
+
+A MUSE-style 15-lead pediatric ECG viewer for teaching ECG interpretation. Access via "Get 15-Lead ECG" button during simulation.
+
+### Architecture
+
+```
+src/kernel/ecg/                    # Deterministic waveform generation
+├── types.ts                       # LeadName, WaveComponent, ECGMeasurements
+├── morphology.ts                  # Per-lead PQRST morphologies (SVT, Sinus, Asystole)
+├── waveform.ts                    # Gaussian waveform synthesis
+└── measurements.ts                # Auto-calculate PR, QRS, QT, QTc, axis
+
+src/components/ecg-viewer/         # UI presentation layer
+├── ECGViewer.tsx                  # Main modal with "Measure to Learn" mode
+├── LeadGrid.tsx                   # 15-lead layout (12 standard + V3R, V4R, V7)
+├── WaveformCanvas.tsx             # Canvas renderer with ECG paper grid
+├── Calipers.tsx                   # SVG measurement overlay with marching
+└── Controls.tsx                   # Gain/speed/caliper toolbar
+```
+
+### Features
+
+- **15-lead pediatric layout**: Standard 12 leads + right-sided V3R, V4R, V7
+- **"Measure to Learn" mode**: HR, QRS, QT hidden until user measures with calipers
+- **Interactive calipers**: Click twice to measure intervals, provides feedback
+- **Marching calipers**: Verify rhythm regularity across the strip
+- **Standardization controls**: Gain (5/10/20 mm/mV), Speed (25/50 mm/s)
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `C` | Toggle calipers |
+| `M` | Toggle marching mode |
+| `G` | Cycle gain |
+| `S` | Cycle speed |
+| `Esc` | Clear calipers / Close viewer |
+
+### Pediatric SVT Morphology (5yo)
+
+- **Rate**: 220 bpm (R-R = 273ms)
+- **QRS**: Narrow (~70ms)
+- **P waves**: Hidden (no visible P)
+- **Precordial voltages**: Higher than adult (thinner chest wall)
+- **T wave inversion**: Normal in V1 for children

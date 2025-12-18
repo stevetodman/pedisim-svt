@@ -7,6 +7,7 @@ import { useSimulation } from './hooks/useSimulation';
 import { useDebrief } from './hooks/useDebrief';
 import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
 import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
+import { ECGViewer } from './components/ecg-viewer';
 import { checkAIMode } from './api/aiConfig';
 
 // ============================================================================
@@ -349,6 +350,7 @@ export default function App() {
   const [showCardiovertInput, setShowCardiovertInput] = useState(false);
   const [doctorInput, setDoctorInput] = useState('');
   const [aiModeEnabled, setAiModeEnabled] = useState<boolean | null>(null);
+  const [showECG, setShowECG] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -477,6 +479,20 @@ export default function App() {
           data={getDebriefData()}
           onClose={handleCloseDebrief}
           onRestart={handleRestart}
+        />
+      )}
+
+      {/* ECG Viewer Modal */}
+      {showECG && (
+        <ECGViewer
+          patient={{
+            name: sim.patient.name,
+            age: sim.patient.age,
+            weight: sim.patient.weight,
+          }}
+          rhythm={sim.rhythm}
+          heartRate={sim.vitals.hr}
+          onClose={() => setShowECG(false)}
         />
       )}
 
@@ -612,6 +628,16 @@ export default function App() {
                 <button onClick={handleCardiovert} className="bg-red-600 px-2 py-1 rounded text-[10px] font-bold">GO</button>
               </div>
             )}
+
+            <div className="border-t border-white/10 my-1" />
+
+            <button
+              onClick={() => setShowECG(true)}
+              disabled={sim.phase === 'IDLE'}
+              className="w-full p-1.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 disabled:opacity-30 text-[10px] font-bold text-indigo-400"
+            >
+              📊 Get 15-Lead ECG
+            </button>
           </div>
 
           <div className="bg-slate-800/50 rounded-lg p-2 text-xs text-slate-600">
