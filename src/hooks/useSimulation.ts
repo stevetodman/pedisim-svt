@@ -49,6 +49,15 @@ import {
   formatSiteName,
   IO_TIMING,
 } from '../kernel/procedures';
+import {
+  type PerfusionAssessment,
+  type ProceduralEffect,
+  calculatePerfusion,
+  getIVInsertionEffects,
+  getIOInsertionEffects,
+  detectPerfusionChanges,
+  getNurseObservation,
+} from '../kernel/clinicalAssessment';
 
 // Types
 export type SimPhase = 'IDLE' | 'RUNNING' | 'ASYSTOLE' | 'CONVERTED';
@@ -154,6 +163,20 @@ export function useSimulation() {
   // Physiologic realism state
   const [deteriorationStage, setDeteriorationStage] = useState<DeteriorationState['stage']>('compensated');
   const [conversionTime, setConversionTime] = useState<number | null>(null);  // When conversion happened
+
+  // Clinical assessment state (Tier 2 realism)
+  const [perfusion, setPerfusion] = useState<PerfusionAssessment>(() =>
+    calculatePerfusion('compensated', false, false)
+  );
+  const previousPerfusionRef = useRef<PerfusionAssessment | null>(null);
+
+  // Procedural effects state - tracks transient vital changes from procedures
+  const [activeProceduralEffect, setActiveProceduralEffect] = useState<{
+    effect: ProceduralEffect;
+    startTime: number;
+    type: 'iv' | 'io' | 'sedation';
+  } | null>(null);
+  const proceduralObservationsShownRef = useRef<Set<string>>(new Set());
 
   // Sedation state machine
   const [sedationState, setSedationState] = useState<SedationState>('NONE');
@@ -374,6 +397,12 @@ export function useSimulation() {
     setIvAttemptDuration(0);
     setPendingIVOutcome(null);
     setShowIOChoice(false);
+
+    // Reset clinical assessment state
+    setPerfusion(calculatePerfusion('compensated', false, false));
+    previousPerfusionRef.current = null;
+    setActiveProceduralEffect(null);
+    proceduralObservationsShownRef.current.clear();
   }, []);
 
   // Convert to sinus - now uses recovery curve for realistic HR normalization
@@ -684,6 +713,14 @@ export function useSimulation() {
     addMessage('nurse', getIVNurseDialogue('starting', attemptNum, formattedSite));
     logAction('establish_iv', { result: 'pending' });
 
+    // Start procedural physiologic effect (SpO2 drop, artifact)
+    const ivEffect = getIVInsertionEffects(attemptNum);
+    setActiveProceduralEffect({
+      effect: ivEffect,
+      startTime: elapsed,
+      type: 'iv',
+    });
+
     // Lily's initial reaction
     setTimeout(() => {
       const reaction = attemptNum === 1
@@ -729,11 +766,19 @@ export function useSimulation() {
       setLilyFear(5); // Max fear for IO
     }, IO_TIMING.PREPARATION);
 
-    // Drilling phase
+    // Drilling phase - this is the painful part
     setTimeout(() => {
       setIoAccessState('DRILLING');
       addMessage('nurse', getIONurseDialogue('drilling'));
       addMessage('lily', getLilyIOReaction('drilling'));
+
+      // Start IO procedural effect (severe SpO2 drop, artifact)
+      const ioEffect = getIOInsertionEffects();
+      setActiveProceduralEffect({
+        effect: ioEffect,
+        startTime: elapsed + IO_TIMING.PREPARATION + 2000,
+        type: 'io',
+      });
 
       // Mark's reaction (random if stays or leaves)
       const staysInRoom = Math.random() > 0.4; // 60% chance to stay
@@ -975,12 +1020,49 @@ export function useSimulation() {
       // Calculate and set new vitals (only every 500ms to reduce updates)
       if (elapsed % 500 === 0) {
         const newVitals = calculateSVTVitals(timeInSVT);
+
+        // Apply procedural effect to SpO2 if active
+        let adjustedSpO2 = newVitals.spo2;
+        if (activeProceduralEffect) {
+          const effectTime = elapsed - activeProceduralEffect.startTime;
+          if (effectTime < activeProceduralEffect.effect.durationMs) {
+            adjustedSpO2 = Math.max(80, newVitals.spo2 + activeProceduralEffect.effect.spO2Delta);
+
+            // Nurse observation about SpO2 drop (once per procedure)
+            const obsKey = `spo2_drop_${activeProceduralEffect.startTime}`;
+            if (!proceduralObservationsShownRef.current.has(obsKey) && activeProceduralEffect.effect.spO2Delta < -5) {
+              proceduralObservationsShownRef.current.add(obsKey);
+              addMessage('nurse', getNurseObservation('procedure_spo2_drop'));
+            }
+          } else {
+            // Effect has expired, clear it
+            setActiveProceduralEffect(null);
+          }
+        }
+
         setVitals({
           hr: newVitals.hr,
-          spo2: newVitals.spo2,
+          spo2: adjustedSpO2,
           bp: formatBP(newVitals.systolic, newVitals.diastolic),
           rr: newVitals.rr,
         });
+
+        // Update perfusion assessment
+        const newPerfusion = calculatePerfusion(newStage, false, false);
+        setPerfusion(newPerfusion);
+
+        // Check for perfusion changes and trigger nurse observations
+        if (previousPerfusionRef.current) {
+          const changes = detectPerfusionChanges(previousPerfusionRef.current, newPerfusion);
+          for (const change of changes) {
+            const obsKey = `perfusion_${change}_${newStage}`;
+            if (!proceduralObservationsShownRef.current.has(obsKey)) {
+              proceduralObservationsShownRef.current.add(obsKey);
+              addMessage('nurse', getNurseObservation(change));
+            }
+          }
+        }
+        previousPerfusionRef.current = newPerfusion;
       }
     } else if (phase === 'ASYSTOLE') {
       // Calculate asystole vitals
@@ -992,6 +1074,10 @@ export function useSimulation() {
         bp: '--/--',
         rr: 0,
       });
+
+      // Update perfusion to asystole state
+      const asystolePerfusion = calculatePerfusion('critical', true, false);
+      setPerfusion(asystolePerfusion);
     } else if (phase === 'CONVERTED' && conversionTime !== null) {
       // Recovery curve after conversion (update every 500ms)
       if (elapsed % 500 === 0) {
@@ -1003,9 +1089,26 @@ export function useSimulation() {
           bp: formatBP(recoveryVitals.systolic, recoveryVitals.diastolic),
           rr: recoveryVitals.rr,
         });
+
+        // Update perfusion with recovery
+        const recoveryPerfusion = calculatePerfusion('compensated', false, true, timeSinceConversion);
+        setPerfusion(recoveryPerfusion);
+
+        // Check for perfusion recovery and trigger nurse observation
+        if (previousPerfusionRef.current && previousPerfusionRef.current.pulseQuality !== recoveryPerfusion.pulseQuality) {
+          const changes = detectPerfusionChanges(previousPerfusionRef.current, recoveryPerfusion);
+          for (const change of changes) {
+            const obsKey = `perfusion_${change}_recovery`;
+            if (!proceduralObservationsShownRef.current.has(obsKey)) {
+              proceduralObservationsShownRef.current.add(obsKey);
+              addMessage('nurse', getNurseObservation(change));
+            }
+          }
+        }
+        previousPerfusionRef.current = recoveryPerfusion;
       }
     }
-  }, [elapsed, phase, rhythm, deteriorationStage, conversionTime, adenosinePhaseStart]);
+  }, [elapsed, phase, rhythm, deteriorationStage, conversionTime, adenosinePhaseStart, activeProceduralEffect, addMessage]);
 
   // Sedation state machine progression
   useEffect(() => {
@@ -1262,6 +1365,10 @@ export function useSimulation() {
     deteriorationStage,
     sedationState,
     adenosinePhase,
+
+    // Clinical assessment (Tier 2 realism)
+    perfusion,
+    activeProceduralEffect,
 
     // IV/IO procedure state
     ivAccessState,

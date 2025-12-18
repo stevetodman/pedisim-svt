@@ -9,6 +9,7 @@ import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
 import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
 import { ECGViewer } from './components/ecg-viewer';
 import { DefibrillatorPanel } from './components/defibrillator';
+import ClinicalAssessment from './components/ClinicalAssessment';
 import { checkAIMode } from './api/aiConfig';
 
 // ============================================================================
@@ -883,6 +884,7 @@ export default function App() {
         {/* Right - Vitals */}
         <div className="col-span-3">
           <VitalsMonitor vitals={sim.vitals} rhythm={sim.rhythm} phase={sim.phase} />
+          <ClinicalAssessment perfusion={sim.perfusion} phase={sim.phase} />
         </div>
       </div>
     </div>
