@@ -17,24 +17,15 @@ import {
 export async function getCharacterResponse(
   request: DialogueRequest
 ): Promise<DialogueResponse> {
-  // Ensure AI mode check is complete
   const aiEnabled = await checkAIMode();
-  console.log('[CharacterAI] AI enabled:', aiEnabled, 'for character:', request.character);
 
-  // Use scripted responses if AI is not enabled
   if (!aiEnabled) {
-    console.log('[CharacterAI] Using SCRIPTED response');
     return generateScriptedResponse(request);
   }
 
-  // Try AI, fall back to scripted on error
   try {
-    console.log('[CharacterAI] Fetching AI response...');
-    const response = await fetchAIResponse(request);
-    console.log('[CharacterAI] AI response:', response.text);
-    return response;
-  } catch (error) {
-    console.warn('[CharacterAI] AI response failed, using scripted fallback:', error);
+    return await fetchAIResponse(request);
+  } catch {
     return generateScriptedResponse(request);
   }
 }

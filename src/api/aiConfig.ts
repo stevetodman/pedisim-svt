@@ -33,25 +33,11 @@ export function getAIConfig(): AIConfig {
  * This is called once on startup to detect if the proxy is configured
  */
 export async function checkAIMode(): Promise<boolean> {
-  // Return cached result if already checked
-  if (aiModeChecked) {
-    console.log('[AIConfig] Using cached result:', aiModeEnabled);
-    return aiModeEnabled;
-  }
+  if (aiModeChecked) return aiModeEnabled;
+  if (checkPromise) return checkPromise;
 
-  // Return existing promise if check is in progress (prevents race condition)
-  if (checkPromise) {
-    console.log('[AIConfig] Check already in progress, waiting...');
-    return checkPromise;
-  }
-
-  console.log('[AIConfig] Checking AI mode...');
-
-  // Create and store the promise
   checkPromise = (async () => {
     try {
-      console.log('[AIConfig] Making test request to /api/anthropic/v1/messages...');
-      // Quick test to see if proxy is configured
       const response = await fetch('/api/anthropic/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -61,21 +47,11 @@ export async function checkAIMode(): Promise<boolean> {
           messages: [{ role: 'user', content: 'hi' }]
         })
       });
-      console.log('[AIConfig] Proxy response status:', response.status, response.statusText);
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('[AIConfig] Response body:', text.substring(0, 500));
-      }
       aiModeEnabled = response.ok;
-    } catch (error) {
-      console.error('[AIConfig] Proxy check failed with error:', error);
-      console.error('[AIConfig] Error name:', (error as Error).name);
-      console.error('[AIConfig] Error message:', (error as Error).message);
+    } catch {
       aiModeEnabled = false;
     }
-
     aiModeChecked = true;
-    console.log(`[AIConfig] AI Mode: ${aiModeEnabled ? 'ENABLED (proxy detected)' : 'DISABLED (using scripted responses)'}`);
     return aiModeEnabled;
   })();
 
