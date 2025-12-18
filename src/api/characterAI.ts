@@ -3,7 +3,7 @@
 // Unified interface for character responses - AI when available, scripted fallback
 // ============================================================================
 
-import { getAIConfig, isAIModeEnabled, checkAIMode } from './aiConfig';
+import { getAIConfig, checkAIMode } from './aiConfig';
 import {
   DialogueRequest,
   DialogueResponse,
