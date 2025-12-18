@@ -267,10 +267,10 @@ src/kernel/defibrillator/           # Deterministic state machine
 ├── machine.ts                      # 14 state transitions + validation helpers
 └── index.ts                        # Barrel export
 
-src/hooks/useDefibrillator.ts       # React state + animations + audio coordination
+src/hooks/useDefibrillator.ts       # React state + animations coordination
 
 src/components/defibrillator/       # UI presentation layer
-├── DefibrillatorPanel.tsx          # Main modal container
+├── DefibrillatorPanel.tsx          # Main modal + audio integration
 ├── DefibScreen.tsx                 # Canvas ECG with sync markers
 ├── DefibControls.tsx               # SYNC/CHARGE/DISARM/SHOCK buttons
 ├── ChargeBar.tsx                   # Animated charging progress
@@ -297,9 +297,9 @@ OFF → STANDBY → ANALYZING (4s) → SHOCK_ADVISED → CHARGING → READY → 
 2. **Attach pads**: Select position (A-P recommended for pediatric, A-L alternative)
 3. **Rhythm analysis**: 4-second automated analysis → "SHOCKABLE - SVT DETECTED"
 4. **Select energy**: Use ◄ ► buttons, shows "0.5 J/kg = 9J" recommendation
-5. **Charge**: Rising 200→2500Hz audio sweep, charge bar fills (1.5-4s based on energy)
-6. **Clear confirmation**: "Everyone Clear" dialog with hold-to-shock button (500ms)
-7. **Deliver shock**: 92% success → Converts to sinus, or failed → increase energy
+5. **Charge**: Rising 200→2500Hz audio sweep, charge bar fills (1.5-4s based on energy), pulsing ready tone when charged
+6. **Clear confirmation**: "Everyone Clear" dialog with hold-to-shock button (500ms hold + 150ms delay for visual feedback)
+7. **Deliver shock**: Realistic shock sound (noise burst + thump), 92% success → Converts to sinus
 
 ### Nurse Safety Integration
 
@@ -372,8 +372,8 @@ src/audio/
 | Monitor | SpO2 beep, HR beep | Pitch-modulated (880Hz at 100% → 440Hz at 80%) |
 | Alarms | Tachy, SpO2 low/critical, flatline | Distinct alarm patterns with silencing |
 | Procedures | IV insertion, IO drilling, sedation push | Realistic procedural audio |
-| Patient | Crying (4 intensities) | Whimper, short, cry, scream |
-| Defibrillator | Charging, ready, shock, sync markers | Full cardioversion audio |
+| Patient | Crying (4 intensities) | Whimper (400ms), short (600ms), cry (1.2s), scream (1s) - 3-oscillator synthesis with vibrato |
+| Defibrillator | Charging, ready, shock, sync markers | Full cardioversion audio (integrated in DefibrillatorPanel) |
 
 ### SpO2 Tone Mapping
 

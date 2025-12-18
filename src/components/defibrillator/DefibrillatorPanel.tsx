@@ -1,9 +1,10 @@
 // DefibrillatorPanel - Main container for the defibrillator interface
 // Modeled after Zoll X Series for maximum realism
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDefibrillator } from '../../hooks/useDefibrillator';
 import { PadPosition } from '../../kernel/defibrillator/types';
+import { getAudioEngine } from '../../audio';
 import DefibScreen from './DefibScreen';
 import DefibControls from './DefibControls';
 import ChargeBar from './ChargeBar';
@@ -42,6 +43,10 @@ export default function DefibrillatorPanel({
 }: DefibrillatorPanelProps) {
   const [showPadPlacement, setShowPadPlacement] = useState(false);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+
+  // Audio state
+  const audioRef = useRef(getAudioEngine());
+  const wasChargingRef = useRef(false);
 
   const defib = useDefibrillator({
     patientWeight: patient.weight,
@@ -106,8 +111,45 @@ export default function DefibrillatorPanel({
       return;
     }
 
+    // Start charging audio (realistic whine that sweeps from 200Hz to 2500Hz)
+    audioRef.current.startRealisticCharging(defib.state.selectedEnergy, () => {});
+
     defib.charge();
   }, [defib, sedated, onNurseMessage]);
+
+  // Audio state management based on device state changes
+  useEffect(() => {
+    const audio = audioRef.current;
+
+    // Track charging state for transitions
+    const isNowCharging = defib.state.deviceState === 'CHARGING';
+    const isNowReady = defib.state.deviceState === 'READY';
+    const isNowDischarging = defib.state.deviceState === 'DISCHARGING';
+
+    if (isNowReady && wasChargingRef.current) {
+      // Just finished charging - start ready tone
+      audio.stopRealisticCharging();
+      audio.startReadyTone();
+    } else if (isNowDischarging) {
+      // Shock being delivered
+      audio.stopReadyTone();
+      audio.playRealisticShock();
+    } else if (!isNowCharging && !isNowReady && wasChargingRef.current) {
+      // Charge cancelled
+      audio.stopRealisticCharging();
+      audio.stopReadyTone();
+    }
+
+    wasChargingRef.current = isNowCharging;
+  }, [defib.state.deviceState]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      audioRef.current.stopRealisticCharging();
+      audioRef.current.stopReadyTone();
+    };
+  }, []);
 
   // Handle shock button - show clear confirmation
   const handleShockClick = useCallback(() => {

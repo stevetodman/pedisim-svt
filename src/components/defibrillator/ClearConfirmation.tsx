@@ -22,6 +22,8 @@ export default function ClearConfirmation({
   const holdStartRef = useRef<number>(0);
 
   const HOLD_DURATION = 500; // ms to hold for shock
+  const CONFIRM_DELAY = 150; // ms delay after bar fills to let user see completion
+  const confirmTimeoutRef = useRef<number | null>(null);
 
   const startHold = () => {
     setIsHolding(true);
@@ -37,7 +39,10 @@ export default function ClearConfirmation({
           clearInterval(holdIntervalRef.current);
           holdIntervalRef.current = null;
         }
-        onConfirm();
+        // Add small delay so user sees the completed bar before shock fires
+        confirmTimeoutRef.current = window.setTimeout(() => {
+          onConfirm();
+        }, CONFIRM_DELAY);
       }
     }, 16);
   };
@@ -49,6 +54,10 @@ export default function ClearConfirmation({
       clearInterval(holdIntervalRef.current);
       holdIntervalRef.current = null;
     }
+    if (confirmTimeoutRef.current) {
+      clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = null;
+    }
   };
 
   // Cleanup on unmount
@@ -56,6 +65,9 @@ export default function ClearConfirmation({
     return () => {
       if (holdIntervalRef.current) {
         clearInterval(holdIntervalRef.current);
+      }
+      if (confirmTimeoutRef.current) {
+        clearTimeout(confirmTimeoutRef.current);
       }
     };
   }, []);

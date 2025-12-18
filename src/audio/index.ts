@@ -17,7 +17,7 @@ const DEFAULT_CONFIG: AudioEngineConfig = {
   heartBeepVolume: 0.3,
   alarmVolume: 0.15,
   procedureVolume: 0.25,
-  patientVolume: 0.2,
+  patientVolume: 0.7,  // High for clearly audible patient sounds (crying, distress)
   spO2ToneEnabled: true,
 };
 
@@ -884,60 +884,101 @@ export class AudioEngine {
 
   /**
    * Play crying/distress sound
+   * More prominent and realistic child crying sound
    */
   async playCrySound(intensity: 'whimper' | 'short' | 'cry' | 'scream'): Promise<void> {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.masterGain) {
+      console.warn('[Audio] playCrySound: audio context not ready');
+      return;
+    }
+
+    console.log(`[Audio] Playing cry sound: ${intensity}`);
 
     const volume = this.config.patientVolume;
-    const baseFreq = 350; // Child voice fundamental
+    const baseFreq = 550; // Child voice fundamental (5yo girl pitch)
 
+    // Longer durations for more noticeable crying
     const durationMap = {
-      whimper: 200,
-      short: 400,
-      cry: 800,
-      scream: 600,
+      whimper: 400,
+      short: 600,
+      cry: 1200,
+      scream: 1000,
     };
 
+    // Higher volumes for audibility
     const volumeMap = {
-      whimper: 0.3,
-      short: 0.5,
-      cry: 0.7,
-      scream: 1.0,
+      whimper: 0.6,
+      short: 0.8,
+      cry: 1.0,
+      scream: 1.2,
     };
 
     const duration = durationMap[intensity] / 1000;
-    const vol = volume * volumeMap[intensity];
+    const vol = Math.min(1.0, volume * volumeMap[intensity]); // Cap at 1.0
 
-    // Create modulated tone for crying sound
-    const osc = this.ctx.createOscillator();
+    // Create main oscillator with modulation for crying sound
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator(); // Harmonic for richer sound
+    const osc3 = this.ctx.createOscillator(); // Third harmonic for presence
     const gain = this.ctx.createGain();
     const lfo = this.ctx.createOscillator();
     const lfoGain = this.ctx.createGain();
 
+    // LFO for vibrato
     lfo.connect(lfoGain);
-    lfoGain.connect(osc.frequency);
-    osc.connect(gain);
+    lfoGain.connect(osc1.frequency);
+    lfoGain.connect(osc2.frequency);
+    lfoGain.connect(osc3.frequency);
+
+    // Mix all oscillators
+    osc1.connect(gain);
+    osc2.connect(gain);
+    osc3.connect(gain);
     gain.connect(this.masterGain);
 
-    osc.type = 'sine';
-    osc.frequency.value = baseFreq;
+    // Use triangle wave for warmer, more vocal sound
+    osc1.type = 'triangle';
+    osc1.frequency.value = baseFreq;
+
+    osc2.type = 'sine';
+    osc2.frequency.value = baseFreq * 2; // Octave up
+
+    osc3.type = 'sine';
+    osc3.frequency.value = baseFreq * 3; // Third harmonic for presence
 
     lfo.type = 'sine';
-    lfo.frequency.value = intensity === 'scream' ? 8 : 5; // Faster modulation for scream
-    lfoGain.gain.value = intensity === 'scream' ? 100 : 50;
+    lfo.frequency.value = intensity === 'scream' ? 14 : 7; // Vibrato rate
+    lfoGain.gain.value = intensity === 'scream' ? 180 : 100; // Vibrato depth
 
     const now = this.ctx.currentTime;
-    gain.gain.setValueAtTime(vol, now);
+
+    // Volume envelope with attack and sustain
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.exponentialRampToValueAtTime(vol, now + 0.03); // Quick attack
+    gain.gain.setValueAtTime(vol, now + duration * 0.6);
     gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
 
     // Pitch contour (rises then falls for natural cry)
-    osc.frequency.setValueAtTime(baseFreq, now);
-    osc.frequency.linearRampToValueAtTime(baseFreq * 1.3, now + duration * 0.3);
-    osc.frequency.linearRampToValueAtTime(baseFreq * 0.8, now + duration);
+    const peakFreq = intensity === 'scream' ? baseFreq * 1.6 : baseFreq * 1.35;
+    osc1.frequency.setValueAtTime(baseFreq, now);
+    osc1.frequency.linearRampToValueAtTime(peakFreq, now + duration * 0.2);
+    osc1.frequency.linearRampToValueAtTime(baseFreq * 0.8, now + duration);
 
-    osc.start();
+    osc2.frequency.setValueAtTime(baseFreq * 2, now);
+    osc2.frequency.linearRampToValueAtTime(peakFreq * 2, now + duration * 0.2);
+    osc2.frequency.linearRampToValueAtTime(baseFreq * 1.6, now + duration);
+
+    osc3.frequency.setValueAtTime(baseFreq * 3, now);
+    osc3.frequency.linearRampToValueAtTime(peakFreq * 3, now + duration * 0.2);
+    osc3.frequency.linearRampToValueAtTime(baseFreq * 2.4, now + duration);
+
+    osc1.start();
+    osc2.start();
+    osc3.start();
     lfo.start();
-    osc.stop(now + duration);
+    osc1.stop(now + duration);
+    osc2.stop(now + duration);
+    osc3.stop(now + duration);
     lfo.stop(now + duration);
 
     await this.sleep(durationMap[intensity]);

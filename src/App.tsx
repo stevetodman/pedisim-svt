@@ -92,11 +92,17 @@ const ECGTrace = React.memo<ECGTraceProps>(function ECGTrace({ heartRate, rhythm
         if (isAsystole) {
           y = baseline + (Math.random() - 0.5) * 1.5;
         } else if (isSVT) {
-          if (phase >= 12 && phase < 12.3) y += 3;
-          if (phase >= 12.3 && phase < 13) y -= 35;
-          if (phase >= 13 && phase < 13.7) y += 20;
-          if (phase >= 13.7 && phase < 14.5) y += 6 * Math.sin((phase - 13.7) / 0.8 * Math.PI);
-          if (phase > 16 && phase < 22) y -= 8 * Math.sin((phase - 16) / 6 * Math.PI);
+          // SVT at 220 bpm - narrow QRS, visible T wave
+          // Q wave (small)
+          if (phase >= 11 && phase < 12) y += 4;
+          // R wave (tall, narrow)
+          if (phase >= 12 && phase < 13) y -= 38;
+          // S wave
+          if (phase >= 13 && phase < 14) y += 15;
+          // Return to baseline
+          if (phase >= 14 && phase < 15) y += 5 * Math.sin((phase - 14) * Math.PI);
+          // T wave (prominent, upright) - key diagnostic feature
+          if (phase >= 18 && phase < 26) y -= 12 * Math.sin((phase - 18) / 8 * Math.PI);
         } else {
           if (phase > 5 && phase < 12) y -= 6 * Math.sin((phase - 5) / 7 * Math.PI);
           if (phase >= 18 && phase < 19) y += 5;
