@@ -7,6 +7,7 @@ import { useSimulation } from './hooks/useSimulation';
 import { useDebrief } from './hooks/useDebrief';
 import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
 import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
+import { checkAIMode } from './api/aiConfig';
 
 // ============================================================================
 // ECG TRACE COMPONENT
@@ -347,8 +348,14 @@ export default function App() {
   const [showAdenosineInput, setShowAdenosineInput] = useState(false);
   const [showCardiovertInput, setShowCardiovertInput] = useState(false);
   const [doctorInput, setDoctorInput] = useState('');
+  const [aiModeEnabled, setAiModeEnabled] = useState<boolean | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Check AI mode on mount
+  useEffect(() => {
+    checkAIMode().then(setAiModeEnabled);
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -478,6 +485,13 @@ export default function App() {
         <div className="flex items-center gap-2">
           <span className="text-xl">❤️</span>
           <span className="font-black">PediSim <span className="text-red-500">SVT</span></span>
+          {aiModeEnabled !== null && (
+            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+              aiModeEnabled ? 'bg-purple-900/50 text-purple-400' : 'bg-slate-800 text-slate-500'
+            }`}>
+              {aiModeEnabled ? 'AI' : 'SCRIPTED'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {sim.phase !== 'IDLE' && (

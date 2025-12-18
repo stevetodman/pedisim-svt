@@ -15,6 +15,7 @@ export interface AIConfig {
 // Cache the AI mode check result
 let aiModeChecked = false;
 let aiModeEnabled = false;
+let checkPromise: Promise<boolean> | null = null;
 
 /**
  * Get the current AI configuration based on environment variables
@@ -32,27 +33,46 @@ export function getAIConfig(): AIConfig {
  * This is called once on startup to detect if the proxy is configured
  */
 export async function checkAIMode(): Promise<boolean> {
-  if (aiModeChecked) return aiModeEnabled;
-
-  try {
-    // Quick test to see if proxy is configured
-    const response = await fetch('/api/anthropic/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 5,
-        messages: [{ role: 'user', content: 'hi' }]
-      })
-    });
-    aiModeEnabled = response.ok;
-  } catch {
-    aiModeEnabled = false;
+  // Return cached result if already checked
+  if (aiModeChecked) {
+    console.log('[AIConfig] Using cached result:', aiModeEnabled);
+    return aiModeEnabled;
   }
 
-  aiModeChecked = true;
-  console.log(`AI Mode: ${aiModeEnabled ? 'ENABLED (proxy detected)' : 'DISABLED (using scripted responses)'}`);
-  return aiModeEnabled;
+  // Return existing promise if check is in progress (prevents race condition)
+  if (checkPromise) {
+    console.log('[AIConfig] Check already in progress, waiting...');
+    return checkPromise;
+  }
+
+  console.log('[AIConfig] Checking AI mode...');
+
+  // Create and store the promise
+  checkPromise = (async () => {
+    try {
+      // Quick test to see if proxy is configured
+      const response = await fetch('/api/anthropic/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 5,
+          messages: [{ role: 'user', content: 'hi' }]
+        })
+      });
+      console.log('[AIConfig] Proxy response status:', response.status);
+      aiModeEnabled = response.ok;
+    } catch (error) {
+      console.error('[AIConfig] Proxy check failed:', error);
+      aiModeEnabled = false;
+    }
+
+    aiModeChecked = true;
+    console.log(`[AIConfig] AI Mode: ${aiModeEnabled ? 'ENABLED (proxy detected)' : 'DISABLED (using scripted responses)'}`);
+    return aiModeEnabled;
+  })();
+
+  return checkPromise;
 }
 
 /**
