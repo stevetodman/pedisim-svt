@@ -10,11 +10,112 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Inter', system-ui, sans-serif; }
+      body { font-family: 'Inter', system-ui, sans-serif; background: #020617; }
+
+      /* Loading skeleton styles */
+      .loading-skeleton {
+        min-height: 100vh;
+        padding: 8px;
+        color: white;
+      }
+      .skeleton-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .skeleton-logo {
+        font-size: 24px;
+      }
+      .skeleton-title {
+        font-weight: 900;
+        font-size: 14px;
+      }
+      .skeleton-title span { color: #ef4444; }
+      .skeleton-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 300px;
+        gap: 16px;
+        height: calc(100vh - 80px);
+      }
+      .skeleton-panel {
+        background: #0f172a;
+        border-radius: 12px;
+        padding: 16px;
+        animation: skeleton-pulse 1.5s ease-in-out infinite;
+      }
+      .skeleton-vitals {
+        background: #000;
+        border: 2px solid #1e293b;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .skeleton-ecg {
+        height: 80px;
+        background: linear-gradient(90deg, #0f172a 25%, #1e293b 50%, #0f172a 75%);
+        background-size: 200% 100%;
+        border-radius: 8px;
+        animation: skeleton-shimmer 1.5s infinite;
+        margin-bottom: 12px;
+      }
+      .skeleton-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .skeleton-stat {
+        height: 48px;
+        background: #0f172a;
+        border-radius: 8px;
+      }
+      .skeleton-spinner {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 32px;
+        height: 32px;
+        border: 3px solid #1e293b;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: skeleton-spin 1s linear infinite;
+      }
+      @keyframes skeleton-pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 0.8; }
+      }
+      @keyframes skeleton-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+      @keyframes skeleton-spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Loading skeleton shown immediately while JS loads -->
+      <div class="loading-skeleton">
+        <div class="skeleton-header">
+          <span class="skeleton-logo">❤️</span>
+          <span class="skeleton-title">PediSim <span>SVT</span></span>
+        </div>
+        <div class="skeleton-grid">
+          <div class="skeleton-panel"></div>
+          <div class="skeleton-panel"></div>
+          <div class="skeleton-vitals">
+            <div class="skeleton-ecg"></div>
+            <div class="skeleton-stats">
+              <div class="skeleton-stat"></div>
+              <div class="skeleton-stat"></div>
+              <div class="skeleton-stat"></div>
+              <div class="skeleton-stat"></div>
+            </div>
+          </div>
+        </div>
+        <div class="skeleton-spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

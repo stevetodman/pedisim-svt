@@ -395,3 +395,5 @@ export function ECGViewer({ patient, rhythm, heartRate, onClose }: ECGViewerProp
     </div>
   );
 }
+
+export default ECGViewer;

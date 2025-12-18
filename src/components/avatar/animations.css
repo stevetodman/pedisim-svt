@@ -1,0 +1,331 @@
+/**
+ * Lily Avatar Animations
+ * CSS keyframe animations for breathing, expressions, and procedural feedback
+ */
+
+/* ============================================================================
+   BREATHING ANIMATIONS
+   ============================================================================ */
+
+/* Normal breathing - gentle chest rise/fall */
+.breathing-normal {
+  animation: breathe-normal var(--breath-duration, 3s) ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes breathe-normal {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.02);
+  }
+}
+
+/* Increased breathing - more noticeable */
+.breathing-increased {
+  animation: breathe-increased var(--breath-duration, 2s) ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes breathe-increased {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  45% {
+    transform: scaleY(1.04);
+  }
+}
+
+/* Labored breathing - dramatic, with visible effort */
+.breathing-labored {
+  animation: breathe-labored var(--breath-duration, 1.5s) ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes breathe-labored {
+  0%, 100% {
+    transform: scaleY(1) translateY(0);
+  }
+  35% {
+    transform: scaleY(1.08) translateY(-2px);
+  }
+  50% {
+    transform: scaleY(1.06) translateY(-1px);
+  }
+}
+
+/* Shallow breathing - minimal movement */
+.breathing-shallow {
+  animation: breathe-shallow var(--breath-duration, 4s) ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes breathe-shallow {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.01);
+  }
+}
+
+/* No breathing - static */
+.breathing-none {
+  animation: none;
+}
+
+/* ============================================================================
+   NASAL FLARING
+   ============================================================================ */
+
+.nostril.flaring {
+  animation: flare var(--breath-duration, 2s) ease-in-out infinite;
+  transform-origin: center center;
+}
+
+@keyframes flare {
+  0%, 100% {
+    transform: scaleX(1);
+  }
+  30% {
+    transform: scaleX(1.4);
+  }
+}
+
+/* ============================================================================
+   TEARS
+   ============================================================================ */
+
+.tear {
+  animation: tear-fall 2s ease-in infinite;
+  transform-origin: center top;
+}
+
+.tear-right {
+  animation-delay: 0.7s;
+}
+
+@keyframes tear-fall {
+  0% {
+    transform: translateY(0) scaleY(1);
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(15px) scaleY(1.5);
+    opacity: 0;
+  }
+}
+
+/* ============================================================================
+   SKIN TRANSITIONS
+   ============================================================================ */
+
+.avatar-skin {
+  transition: fill 2s ease-in-out;
+}
+
+.avatar-face {
+  transition: fill 2s ease-in-out;
+}
+
+.avatar-mouth {
+  transition: stroke 1s ease-in-out, d 0.3s ease-in-out;
+}
+
+/* ============================================================================
+   EYE ANIMATIONS
+   ============================================================================ */
+
+.avatar-eyes {
+  transition: opacity 0.3s ease-in-out;
+}
+
+.avatar-eyelid-left,
+.avatar-eyelid-right {
+  transition: d 0.3s ease-in-out;
+}
+
+/* Blink animation (can be triggered programmatically) */
+.avatar-blink .avatar-eyes {
+  animation: blink 0.15s ease-in-out;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ============================================================================
+   EYEBROW ANIMATIONS
+   ============================================================================ */
+
+.avatar-eyebrow-left,
+.avatar-eyebrow-right {
+  transition: transform 0.3s ease-in-out;
+}
+
+/* ============================================================================
+   FLINCH ANIMATION (IV/IO PROCEDURES)
+   ============================================================================ */
+
+.avatar-flinch {
+  animation: flinch 0.3s ease-out;
+}
+
+@keyframes flinch {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-2px, -1px);
+  }
+  50% {
+    transform: translate(1px, 1px);
+  }
+  75% {
+    transform: translate(-1px, 0);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+.arm-flinch {
+  animation: arm-pull 0.4s ease-out;
+  transform-origin: top center;
+}
+
+@keyframes arm-pull {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  30% {
+    transform: rotate(-15deg);
+  }
+  60% {
+    transform: rotate(-10deg);
+  }
+}
+
+/* ============================================================================
+   SEDATION ANIMATION
+   ============================================================================ */
+
+.avatar-sedated {
+  animation: sedation-drift 4s ease-in-out infinite;
+}
+
+@keyframes sedation-drift {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+/* ============================================================================
+   DISTRESS PULSE
+   ============================================================================ */
+
+.avatar-distress-indicator {
+  animation: distress-pulse 1s ease-in-out infinite;
+}
+
+@keyframes distress-pulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+/* ============================================================================
+   POSTURE TRANSITIONS
+   ============================================================================ */
+
+.avatar-body-group {
+  transition: transform 1s ease-in-out;
+}
+
+/* ============================================================================
+   SHOCK/CARDIOVERSION ANIMATION
+   ============================================================================ */
+
+.avatar-shock {
+  animation: shock-jolt 0.2s ease-out;
+}
+
+@keyframes shock-jolt {
+  0% {
+    transform: translate(0, 0) rotate(0);
+  }
+  20% {
+    transform: translate(0, -5px) rotate(-2deg);
+  }
+  40% {
+    transform: translate(2px, 0) rotate(1deg);
+  }
+  60% {
+    transform: translate(-2px, 2px) rotate(-1deg);
+  }
+  80% {
+    transform: translate(1px, 0) rotate(0.5deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+}
+
+/* ============================================================================
+   RELIEF ANIMATION (POST-CONVERSION)
+   ============================================================================ */
+
+.avatar-relief {
+  animation: relief-sigh 2s ease-out;
+}
+
+@keyframes relief-sigh {
+  0% {
+    transform: scaleY(1);
+  }
+  20% {
+    transform: scaleY(1.05);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+/* ============================================================================
+   LILY AVATAR CONTAINER
+   ============================================================================ */
+
+.lily-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.lily-avatar svg {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .lily-avatar svg {
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
+  }
+}

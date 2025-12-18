@@ -2,15 +2,32 @@
 // PEDISIM SVT - Main Application
 // ============================================================================
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense, lazy, useMemo } from 'react';
 import { useSimulation, type VagalTechnique } from './hooks/useSimulation';
 import { useDebrief } from './hooks/useDebrief';
 import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
-import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
-import { ECGViewer } from './components/ecg-viewer';
-import { DefibrillatorPanel } from './components/defibrillator';
+import { LoadingState, QuickSummary } from './components/debrief';
 import ClinicalAssessment from './components/ClinicalAssessment';
 import { checkAIMode } from './api/aiConfig';
+import { LilyAvatar, mapSimulationToAvatar } from './components/avatar';
+
+// Lazy load heavy components for better initial load performance
+const ECGViewer = lazy(() => import('./components/ecg-viewer/ECGViewer'));
+const DefibrillatorPanel = lazy(() => import('./components/defibrillator/DefibrillatorPanel'));
+const DebriefView = lazy(() => import('./components/debrief/DebriefView'));
+
+// ============================================================================
+// LAZY LOAD FALLBACK
+// ============================================================================
+
+const LazyLoadFallback: React.FC<{ message?: string }> = ({ message = 'Loading...' }) => (
+  <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50">
+    <div className="bg-slate-900 rounded-xl p-8 text-center border border-slate-700">
+      <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4" />
+      <p className="text-slate-400 text-sm">{message}</p>
+    </div>
+  </div>
+);
 
 // ============================================================================
 // ECG TRACE COMPONENT
@@ -23,7 +40,7 @@ interface ECGTraceProps {
   height?: number;
 }
 
-const ECGTrace: React.FC<ECGTraceProps> = ({ heartRate, rhythm, width = 280, height = 80 }) => {
+const ECGTrace = React.memo<ECGTraceProps>(function ECGTrace({ heartRate, rhythm, width = 280, height = 80 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef(0);
 
@@ -100,7 +117,7 @@ const ECGTrace: React.FC<ECGTraceProps> = ({ heartRate, rhythm, width = 280, hei
   }, [heartRate, rhythm, width, height]);
 
   return <canvas ref={canvasRef} width={width} height={height} className="rounded-lg" />;
-};
+});
 
 // ============================================================================
 // VITALS MONITOR COMPONENT
@@ -112,7 +129,7 @@ interface VitalsMonitorProps {
   phase: string;
 }
 
-const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, rhythm, phase }) => {
+const VitalsMonitor = React.memo<VitalsMonitorProps>(function VitalsMonitor({ vitals, rhythm, phase }) {
   const isAsystole = rhythm === 'ASYSTOLE' || phase === 'ASYSTOLE';
   const isCritical = vitals.hr > 180 || isAsystole;
   const displayHR = isAsystole ? 0 : vitals.hr;
@@ -177,7 +194,7 @@ const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, rhythm, phase }) 
       </div>
     </div>
   );
-};
+});
 
 // ============================================================================
 // DEBRIEF PANEL
@@ -444,6 +461,44 @@ export default function App() {
   const isRunning = sim.phase === 'RUNNING';
   const canSpeak = sim.phase === 'RUNNING' || sim.phase === 'CONVERTED';
 
+  // Calculate avatar state from simulation state
+  const avatarState = useMemo(() => {
+    // Parse BP to get systolic for perfusion estimation
+    const bpParts = sim.vitals.bp.split('/');
+    const systolic = parseInt(bpParts[0]) || 92;
+    const diastolic = parseInt(bpParts[1]) || 64;
+
+    return mapSimulationToAvatar({
+      phase: sim.phase as 'IDLE' | 'RUNNING' | 'ASYSTOLE' | 'CONVERTED',
+      deteriorationStage: sim.deteriorationStage,
+      lilyFear: sim.lilyFear ?? 2,
+      vitals: {
+        hr: sim.vitals.hr,
+        spo2: sim.vitals.spo2,
+        rr: sim.vitals.rr,
+        sbp: systolic,
+        dbp: diastolic,
+      },
+      ivAccess: sim.ivAccess || sim.ioAccess,
+      ivInProgress: sim.ivAccessState === 'ATTEMPTING' || sim.ivAccessState === 'ATTEMPTING_SECOND',
+      ioInProgress: sim.ioAccessState === 'DRILLING',
+      sedated: sim.sedated,
+    });
+  }, [
+    sim.phase,
+    sim.deteriorationStage,
+    sim.lilyFear,
+    sim.vitals.hr,
+    sim.vitals.spo2,
+    sim.vitals.rr,
+    sim.vitals.bp,
+    sim.ivAccess,
+    sim.ioAccess,
+    sim.ivAccessState,
+    sim.ioAccessState,
+    sim.sedated,
+  ]);
+
   const colors: Record<string, { bg: string; border: string; label: string }> = {
     lily: { bg: 'bg-pink-500/10', border: 'border-pink-500/30', label: 'text-pink-400' },
     mark: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: 'text-amber-400' },
@@ -498,13 +553,15 @@ export default function App() {
 
       {/* Full Enhanced Debrief View */}
       {showDebrief && useEnhancedDebrief && showFullDebrief && debrief.evaluation && debrief.narratives && (
-        <DebriefView
-          evaluation={debrief.evaluation}
-          narratives={debrief.narratives}
-          dialogueHooks={debrief.dialogueHooks}
-          onClose={handleCloseDebrief}
-          onReplay={handleRestart}
-        />
+        <Suspense fallback={<LazyLoadFallback message="Loading debrief..." />}>
+          <DebriefView
+            evaluation={debrief.evaluation}
+            narratives={debrief.narratives}
+            dialogueHooks={debrief.dialogueHooks}
+            onClose={handleCloseDebrief}
+            onReplay={handleRestart}
+          />
+        </Suspense>
       )}
 
       {/* Fallback to simple debrief if enhanced disabled */}
@@ -518,16 +575,18 @@ export default function App() {
 
       {/* ECG Viewer Modal */}
       {showECG && (
-        <ECGViewer
-          patient={{
-            name: sim.patient.name,
-            age: sim.patient.age,
-            weight: sim.patient.weight,
-          }}
-          rhythm={sim.wpwRevealed && sim.rhythm === 'SINUS' ? 'WPW_SINUS' : sim.rhythm}
-          heartRate={sim.rhythm === 'SVT' ? 220 : sim.rhythm === 'ASYSTOLE' ? 0 : 90}
-          onClose={() => setShowECG(false)}
-        />
+        <Suspense fallback={<LazyLoadFallback message="Loading ECG viewer..." />}>
+          <ECGViewer
+            patient={{
+              name: sim.patient.name,
+              age: sim.patient.age,
+              weight: sim.patient.weight,
+            }}
+            rhythm={sim.wpwRevealed && sim.rhythm === 'SINUS' ? 'WPW_SINUS' : sim.rhythm}
+            heartRate={sim.rhythm === 'SVT' ? 220 : sim.rhythm === 'ASYSTOLE' ? 0 : 90}
+            onClose={() => setShowECG(false)}
+          />
+        </Suspense>
       )}
 
       {/* Defibrillator Panel */}
@@ -538,36 +597,38 @@ export default function App() {
         const diastolic = parseInt(bpParts[1]) || 64;
 
         return (
-          <DefibrillatorPanel
-            patient={{
-              name: sim.patient.name,
-              age: `${sim.patient.age}yo`,
-              weight: sim.patient.weight,
-            }}
-            rhythm={sim.rhythm}
-            vitals={{
-              hr: sim.vitals.hr,
-              spo2: sim.vitals.spo2,
-              systolic,
-              diastolic,
-            }}
-            sedated={sim.sedated}
-            getSimulationTime={() => sim.elapsed}
-            onShockDelivered={(energy, _syncMode) => {
-              // Use the existing cardiovert function with fromDefibPanel=true
-              // This skips duplicate audio/timing since defib panel handled it
-              sim.cardiovert(energy, true);
-              // Close defibrillator panel after outcome displays
-              setTimeout(() => {
-                setShowDefib(false);
-              }, 1500);
-            }}
-            onClose={() => setShowDefib(false)}
-            onNurseMessage={(_message) => {
-              // Nurse messages are handled by useSimulation internally
-              // This is just for additional feedback if needed
-            }}
-          />
+          <Suspense fallback={<LazyLoadFallback message="Loading defibrillator..." />}>
+            <DefibrillatorPanel
+              patient={{
+                name: sim.patient.name,
+                age: `${sim.patient.age}yo`,
+                weight: sim.patient.weight,
+              }}
+              rhythm={sim.rhythm}
+              vitals={{
+                hr: sim.vitals.hr,
+                spo2: sim.vitals.spo2,
+                systolic,
+                diastolic,
+              }}
+              sedated={sim.sedated}
+              getSimulationTime={() => sim.elapsed}
+              onShockDelivered={(energy, _syncMode) => {
+                // Use the existing cardiovert function with fromDefibPanel=true
+                // This skips duplicate audio/timing since defib panel handled it
+                sim.cardiovert(energy, true);
+                // Close defibrillator panel after outcome displays
+                setTimeout(() => {
+                  setShowDefib(false);
+                }, 1500);
+              }}
+              onClose={() => setShowDefib(false)}
+              onNurseMessage={(_message) => {
+                // Nurse messages are handled by useSimulation internally
+                // This is just for additional feedback if needed
+              }}
+            />
+          </Suspense>
         );
       })()}
 
@@ -634,7 +695,10 @@ export default function App() {
         {/* Left - Patient & Actions */}
         <div className="col-span-3 space-y-2">
           <div className="bg-slate-900 rounded-lg p-2 border border-white/5 text-center">
-            <span className="text-xl">👧</span>
+            {/* Animated Lily Avatar */}
+            <div className="flex justify-center mb-1">
+              <LilyAvatar state={avatarState} size="sm" />
+            </div>
             <div className="font-bold text-sm">{sim.patient.name}</div>
             <div className="text-[10px] text-slate-500">{sim.patient.age}yo • {sim.patient.weight}kg</div>
             {sim.phase === 'RUNNING' && sim.rhythm === 'SVT' && (

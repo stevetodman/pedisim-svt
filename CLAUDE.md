@@ -46,6 +46,8 @@ UI Layer (React)
 - `src/api/aiConfig.ts` - Environment-based AI configuration
 - `src/api/characterAI.ts` - Unified character response API with scripted fallback
 - `src/audio/index.ts` - Web Audio API procedural sounds (no audio files)
+- `src/audio/useAudio.ts` - React hook for audio integration
+- `src/components/avatar/` - Animated Lily SVG avatar with state-based visuals
 - `src/App.tsx` - Main UI with inline ECGTrace, VitalsMonitor, DebriefPanel components
 - `src/kernel/ecg/` - ECG waveform generation kernel (morphology, measurements, waveform synthesis)
 - `src/components/ecg-viewer/` - MUSE-style 15-lead ECG viewer with calipers
@@ -105,7 +107,7 @@ Without an API key, characters use scripted fallback responses (fully functional
 
 ## Testing
 
-**157 tests** covering the simulation kernel. Run with:
+**200 tests** covering the simulation kernel. Run with:
 
 ```bash
 npm run test        # Watch mode
@@ -350,3 +352,134 @@ When SYNC is ON (green indicator):
 When SYNC is OFF (defib mode):
 - Immediate shock delivery (for VF/pulseless VT)
 - Nurse will warn if used inappropriately for SVT
+
+## Audio System
+
+All sounds are procedurally generated via Web Audio API - no audio files required.
+
+### Architecture
+
+```
+src/audio/
+├── index.ts          # AudioEngine class with all sound generation
+└── useAudio.ts       # React hook for audio integration
+```
+
+### Sound Categories
+
+| Category | Sounds | Description |
+|----------|--------|-------------|
+| Monitor | SpO2 beep, HR beep | Pitch-modulated (880Hz at 100% → 440Hz at 80%) |
+| Alarms | Tachy, SpO2 low/critical, flatline | Distinct alarm patterns with silencing |
+| Procedures | IV insertion, IO drilling, sedation push | Realistic procedural audio |
+| Patient | Crying (4 intensities) | Whimper, short, cry, scream |
+| Defibrillator | Charging, ready, shock, sync markers | Full cardioversion audio |
+
+### SpO2 Tone Mapping
+
+```
+SpO2 100% → 880Hz (bright, high)
+SpO2 95%  → 750Hz
+SpO2 90%  → 620Hz (concerning)
+SpO2 85%  → 520Hz (alarm threshold)
+SpO2 80%  → 440Hz (deep, ominous)
+```
+
+### Alarm Management
+
+- Alarms can be silenced individually or all at once
+- Silence duration: 60 seconds
+- Auto-reactivates after timeout if condition persists
+
+### useAudio Hook
+
+```typescript
+const audio = useAudio();
+
+// Initialize (requires user interaction)
+await audio.init();
+
+// Heart rate monitoring
+audio.startHeartbeat(hr, spo2, isSVT);
+audio.updateVitals(hr, spo2, isSVT);
+
+// Procedural sounds
+await audio.playIVSound(success);
+await audio.playIOSound();
+await audio.playSedationSound();
+await audio.playCry('scream');
+
+// Alarm control
+audio.silenceAlarms();
+```
+
+## Lily Avatar System
+
+Animated SVG avatar showing Lily's clinical state through visual feedback.
+
+### Architecture
+
+```
+src/components/avatar/
+├── types.ts          # AvatarState, skin colors, constants
+├── stateMapper.ts    # Simulation → Avatar state mapping
+├── LilyAvatar.tsx    # Main SVG component
+├── animations.css    # CSS keyframe animations
+└── index.ts          # Barrel exports
+```
+
+### Visual States
+
+| State | Trigger | Visual Changes |
+|-------|---------|----------------|
+| Expression | Fear level 0-5 | Neutral → worried → scared → distressed → exhausted |
+| Skin tone | Perfusion/SpO2 | Pink → pale → mottled → gray → cyanotic |
+| Eye state | Fear + phase | Open → wide → squinting → half-closed → closed |
+| Breathing | Respiratory rate | Chest rise/fall speed synced to RR |
+| Tears | Fear ≥ 3 | Animated falling tears |
+| Nasal flaring | Decompensating | Nostril animation during breathing |
+
+### State Mapping
+
+```typescript
+import { mapSimulationToAvatar } from './components/avatar';
+
+const avatarState = mapSimulationToAvatar({
+  phase: 'RUNNING',
+  deteriorationStage: 'moderate_stress',
+  lilyFear: 3,
+  vitals: { hr: 220, spo2: 94, rr: 32, sbp: 88, dbp: 58 },
+  ivAccess: true,
+  sedated: false,
+});
+
+// Returns AvatarState with all visual properties
+```
+
+### Procedural Animations
+
+- **Flinch**: Body shake during IV/IO attempts
+- **Arm pull**: Right arm pulls back during procedures
+- **Sedation drift**: Gentle floating motion when sedated
+- **Shock jolt**: Brief body movement during cardioversion
+
+### CSS Animations
+
+All animations use CSS keyframes with CSS custom properties:
+
+```css
+.breathing-normal { animation: breathe-normal var(--breath-duration) ease-in-out infinite; }
+.breathing-labored { animation: breathe-labored var(--breath-duration) ease-in-out infinite; }
+```
+
+### Skin Color Transitions
+
+Smooth 2-second transitions between skin tones:
+
+| Skin Tone | Hex | Clinical State |
+|-----------|-----|----------------|
+| Pink | #ffdbac | Healthy, well-perfused |
+| Pale | #f5e6d3 | Early stress |
+| Mottled | #e8dcd0 | Moderate stress |
+| Gray | #d0c8c0 | Poor perfusion |
+| Cyanotic | #b8c4d0 | Critical/asystole |
