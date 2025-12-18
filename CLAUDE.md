@@ -42,8 +42,19 @@ UI Layer (React)
 - `src/kernel/physiology.ts` - Intervention processors: vagal (25% success), adenosine (60-80%), cardioversion (92%)
 - `src/kernel/nurse.ts` - Dose validation with `evaluateAdenosineOrder()` and `evaluateCardioversionOrder()`
 - `src/kernel/doses.ts` - PALS 2020 protocols: adenosine 0.1/0.2 mg/kg, cardioversion 0.5-2 J/kg
+- `src/kernel/random.ts` - Seeded random utility for reproducible test outcomes
+- `src/api/aiConfig.ts` - Environment-based AI configuration
+- `src/api/characterAI.ts` - Unified character response API with scripted fallback
 - `src/audio/index.ts` - Web Audio API procedural sounds (no audio files)
 - `src/App.tsx` - Main UI with inline ECGTrace, VitalsMonitor, DebriefPanel components
+
+### Prerequisites System
+
+The simulation enforces realistic clinical prerequisites:
+
+- **IV/IO Access**: Must be established before adenosine or sedation can be given
+- **Sedation**: Required before synchronized cardioversion
+- User must click "Establish IV" button before medication administration
 
 ### Simulation Flow
 
@@ -59,7 +70,19 @@ IDLE → RUNNING (SVT @ 220 BPM)
 
 ### AI Character System
 
-Characters (Lily, Mark/father, Nurse) use Claude Sonnet via direct API calls in `useSimulation.ts`. Each has emotional state tracking (lilyFear 0-5, markAnxiety 1-5) that influences prompts. Character responses are cosmetic and never affect clinical outcomes.
+Characters (Lily, Mark/father, Nurse) respond emotionally to clinical decisions. Each has emotional state tracking (lilyFear 0-5, markAnxiety 1-5) that influences responses. Character responses are cosmetic and never affect clinical outcomes.
+
+**Two modes of operation:**
+
+1. **Scripted Mode (default)**: Context-aware scripted responses from `src/characters/index.ts`. Works without any API key.
+
+2. **AI Mode (optional)**: When `VITE_ANTHROPIC_API_KEY` is set in `.env`, uses Claude Sonnet via Vite proxy for dynamic responses. Falls back to scripted on API errors.
+
+```
+src/api/
+├── aiConfig.ts      # Environment detection, API config
+└── characterAI.ts   # Unified API: getCharacterResponse()
+```
 
 ### PALS Reference Values (18.5kg patient)
 
@@ -67,9 +90,49 @@ Characters (Lily, Mark/father, Nurse) use Claude Sonnet via direct API calls in 
 - Adenosine 2nd: 3.7mg (0.2 mg/kg, max 12mg)
 - Cardioversion: 9-37J (0.5-2 J/kg)
 
+## Environment Setup
+
+Copy `.env.example` to `.env` for optional AI-powered character responses:
+
+```bash
+cp .env.example .env
+# Edit .env and add your Anthropic API key (optional)
+```
+
+Without an API key, characters use scripted fallback responses (fully functional).
+
 ## Testing
 
-Tests directory exists at `/tests` but is currently empty. Vitest is configured. The kernel's `physiology.ts` supports seeded random via `setRandomSeed()` for reproducible test outcomes.
+**63 tests** covering the simulation kernel. Run with:
+
+```bash
+npm run test        # Watch mode
+npx vitest run      # Single run
+```
+
+### Test Structure
+
+```
+tests/
+├── setup.ts                        # Fixtures, seeded random helpers
+└── kernel/
+    ├── doses.test.ts               # PALS dosing calculations (16 tests)
+    ├── nurse.test.ts               # Safety validation layer (21 tests)
+    ├── physiology.test.ts          # Intervention outcomes (20 tests)
+    └── evaluation/
+        └── causal.test.ts          # Causal chain verification (6 tests)
+```
+
+### Reproducible Random
+
+The kernel uses seeded random (`src/kernel/random.ts`) for deterministic test outcomes:
+
+```typescript
+import { setRandomSeed, resetRandom } from '../src/kernel/random';
+
+beforeEach(() => setRandomSeed(12345));  // Reproducible
+afterEach(() => resetRandom());           // Back to Math.random
+```
 
 ## Debrief System
 
