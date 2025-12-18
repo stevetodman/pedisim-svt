@@ -654,13 +654,67 @@ export default function App() {
           </div>
 
           <div className="bg-slate-900 rounded-lg p-2 border border-white/5 space-y-1">
+            {/* IV/IO Access Button */}
             <button
               onClick={sim.establishIV}
-              disabled={!isRunning || sim.ivAccess}
-              className="w-full p-1.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 disabled:opacity-30 text-[10px] font-bold text-emerald-400"
+              disabled={!isRunning || sim.ivAccess || sim.ioAccess ||
+                sim.ivAccessState === 'ATTEMPTING' || sim.ivAccessState === 'ATTEMPTING_SECOND'}
+              className={`w-full p-1.5 rounded border text-[10px] font-bold ${
+                sim.ivAccess || sim.ioAccess
+                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                  : sim.ivAccessState === 'ATTEMPTING' || sim.ivAccessState === 'ATTEMPTING_SECOND'
+                    ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300 animate-pulse'
+                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/20 text-emerald-400 disabled:opacity-30'
+              }`}
             >
-              Establish IV {sim.ivAccess && '✓'}
+              {sim.ivAccess ? 'IV Access ✓' :
+               sim.ioAccess ? 'IO Access ✓' :
+               sim.ivAccessState === 'ATTEMPTING' ? 'Establishing IV...' :
+               sim.ivAccessState === 'ATTEMPTING_SECOND' ? 'Trying 2nd site...' :
+               sim.ivAttempts.length > 0 ? `Establish IV (${sim.ivAttempts.length} failed)` :
+               'Establish IV'}
             </button>
+
+            {/* IO Choice Dialog */}
+            {sim.showIOChoice && (
+              <div className="p-2 bg-amber-900/30 rounded border border-amber-500/50 space-y-2">
+                <p className="text-[9px] text-amber-300 font-bold">
+                  {sim.ivAccessState === 'DIFFICULT'
+                    ? "⚠️ Difficult IV access - veins are tiny"
+                    : "⚠️ All peripheral sites attempted"}
+                </p>
+                <div className="flex gap-1">
+                  <button
+                    onClick={sim.continueIV}
+                    disabled={sim.ivAccessState === 'FAILED_ALL'}
+                    className="flex-1 p-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-[9px] font-bold text-emerald-300 disabled:opacity-30"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={sim.establishIO}
+                    className="flex-1 p-1.5 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-[9px] font-bold text-red-300"
+                  >
+                    Go IO ⚡
+                  </button>
+                </div>
+                <p className="text-[8px] text-amber-200/60">
+                  IO: Faster but more painful. Intraosseous tibial access.
+                </p>
+              </div>
+            )}
+
+            {/* IO Progress */}
+            {sim.ioAccessState !== 'NOT_ATTEMPTED' && sim.ioAccessState !== 'SUCCESS' && (
+              <div className="p-1.5 bg-red-900/20 rounded border border-red-500/30">
+                <p className="text-[9px] text-red-300 font-bold animate-pulse">
+                  {sim.ioAccessState === 'PREPARING' ? '🔧 Preparing IO kit...' :
+                   sim.ioAccessState === 'DRILLING' ? '🔴 DRILLING IO...' :
+                   sim.ioAccessState === 'CONFIRMING' ? '✓ Confirming placement...' :
+                   'IO in progress...'}
+                </p>
+              </div>
+            )}
 
             <button
               onClick={() => setShowVagalOptions(!showVagalOptions)}

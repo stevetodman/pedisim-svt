@@ -73,11 +73,17 @@ test.describe('PediSim SVT - Basic Simulation Flow', () => {
   });
 
   test('should establish IV access', async ({ page }) => {
+    test.setTimeout(120000); // IV may need multiple attempts
+
     await startSimulation(page);
+
+    // Use helper which handles retries and IO fallback
     await establishIV(page);
 
-    // Verify IV button shows checkmark
-    await expect(page.locator('button:has-text("Establish IV ✓")')).toBeVisible();
+    // Verify access was obtained (either IV or IO)
+    await expect(
+      page.getByRole('button', { name: 'IV Access ✓' }).or(page.getByRole('button', { name: 'IO Access ✓' }))
+    ).toBeVisible();
   });
 
   test('should perform vagal maneuver', async ({ page }) => {
@@ -432,9 +438,12 @@ test.describe('PediSim SVT - Complete Scenario', () => {
     await startSimulation(page);
     await expect(page.locator('text=RUNNING')).toBeVisible();
 
-    // 2. Establish IV
+    // 2. Establish IV (may result in IO if IV fails)
     await establishIV(page);
-    await expect(page.locator('text=IV patent')).toBeVisible();
+    // Verify access was obtained (either IV or IO)
+    await expect(
+      page.getByRole('button', { name: 'IV Access ✓' }).or(page.getByRole('button', { name: 'IO Access ✓' }))
+    ).toBeVisible();
 
     // 3. Attempt vagal
     await doVagal(page);

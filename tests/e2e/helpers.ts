@@ -80,12 +80,54 @@ export async function resetSimulation(page: Page) {
 }
 
 /**
- * Establish IV access
+ * Establish IV access - now takes 8-12s due to realistic timing
+ * May result in IO access if IV fails multiple times
  */
-export async function establishIV(page: Page) {
+export async function establishIV(page: Page, maxWaitMs = 60000) {
   await page.click(selectors.establishIVButton);
-  // Wait for confirmation message
-  await expect(page.locator('text=IV patent')).toBeVisible({ timeout: 5000 });
+
+  // Locators for success states
+  const ivSuccessButton = page.getByRole('button', { name: 'IV Access ✓' });
+  const ioSuccessButton = page.getByRole('button', { name: 'IO Access ✓' });
+  const goIOButton = page.getByRole('button', { name: /Go IO/ });
+  // Button shows "Establish IV (N failed)" after failed attempts and needs re-click
+  const failedRetryButton = page.getByRole('button', { name: /Establish IV \(\d+ failed\)/ });
+
+  // Wait for success or handle retries/IO choice
+  const startTime = Date.now();
+  while (Date.now() - startTime < maxWaitMs) {
+    // Check for IV success
+    if (await ivSuccessButton.isVisible().catch(() => false)) {
+      return;
+    }
+
+    // Check for IO success
+    if (await ioSuccessButton.isVisible().catch(() => false)) {
+      return;
+    }
+
+    // Check for IO choice dialog - go IO when offered (faster for testing)
+    // IMPORTANT: Check this BEFORE retry button to avoid clicking both
+    const ioChoiceVisible = await goIOButton.isVisible().catch(() => false);
+    if (ioChoiceVisible) {
+      await goIOButton.click();
+      // Wait for either IO or IV success (race condition in simulation may allow IV to succeed)
+      await expect(ivSuccessButton.or(ioSuccessButton)).toBeVisible({ timeout: 30000 });
+      return;
+    }
+
+    // Check if IV failed and button is ready for retry - click again
+    // Only do this if IO choice is NOT visible (they share the same UI state)
+    if (await failedRetryButton.isVisible().catch(() => false)) {
+      await failedRetryButton.click();
+    }
+
+    // Wait a bit before checking again
+    await page.waitForTimeout(500);
+  }
+
+  // Final check - use .or() to match either success state
+  await expect(ivSuccessButton.or(ioSuccessButton)).toBeVisible({ timeout: 5000 });
 }
 
 /**

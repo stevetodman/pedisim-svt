@@ -33,6 +33,22 @@ import {
   getSedationPhaseDuration,
   getAdenosinePhaseDuration,
 } from '../kernel/pharmacokinetics';
+import {
+  type IVAccessState,
+  type IOAccessState,
+  type IVAttempt,
+  rollIVOutcome,
+  getIVAttemptDuration,
+  getIVNurseDialogue,
+  getLilyIVReaction,
+  getMarkIVReaction,
+  getIONurseDialogue,
+  getLilyIOReaction,
+  getMarkIOReaction,
+  getAvailableSites,
+  formatSiteName,
+  IO_TIMING,
+} from '../kernel/procedures';
 
 // Types
 export type SimPhase = 'IDLE' | 'RUNNING' | 'ASYSTOLE' | 'CONVERTED';
@@ -98,9 +114,23 @@ export function useSimulation() {
   const [cardioversionCount, setCardioversionCount] = useState(0);
   const [sedated, setSedated] = useState(false);
 
-  // Access state
+  // Access state - simple flags for whether access exists
   const [ivAccess, setIvAccess] = useState(false);
   const [ioAccess, setIoAccess] = useState(false);
+
+  // IV/IO procedure state machine
+  const [ivAccessState, setIvAccessState] = useState<IVAccessState>('NOT_ATTEMPTED');
+  const [ioAccessState, setIoAccessState] = useState<IOAccessState>('NOT_ATTEMPTED');
+  const [ivAttempts, setIvAttempts] = useState<IVAttempt[]>([]);
+  const [currentIVSite, setCurrentIVSite] = useState<string | null>(null);
+  const [ivAttemptStart, setIvAttemptStart] = useState<number | null>(null);
+  const [ivAttemptDuration, setIvAttemptDuration] = useState<number>(0);
+  const [pendingIVOutcome, setPendingIVOutcome] = useState<{
+    success: boolean;
+    difficult: boolean;
+    reason?: string;
+  } | null>(null);
+  const [showIOChoice, setShowIOChoice] = useState(false);
 
   // Character state
   const [markAnxiety, setMarkAnxiety] = useState(3);
@@ -334,6 +364,16 @@ export function useSimulation() {
     setPhase('IDLE');
     setMessages([]);
     setPendingAction(null);
+
+    // Reset IV/IO state
+    setIvAccessState('NOT_ATTEMPTED');
+    setIoAccessState('NOT_ATTEMPTED');
+    setIvAttempts([]);
+    setCurrentIVSite(null);
+    setIvAttemptStart(null);
+    setIvAttemptDuration(0);
+    setPendingIVOutcome(null);
+    setShowIOChoice(false);
   }, []);
 
   // Convert to sinus - now uses recovery curve for realistic HR normalization
@@ -600,19 +640,139 @@ export function useSimulation() {
     }, 2000);
   }, [phase, rhythm, addMessage, logAction, convertToSinus]);
 
-  // Establish IV access
+  // Establish IV access - now uses realistic state machine
   const establishIV = useCallback(() => {
     if (phase !== 'RUNNING') return;
 
-    if (ivAccess) {
-      addMessage('nurse', "IV access already established, doctor.");
+    if (ivAccess || ioAccess) {
+      addMessage('nurse', ivAccess
+        ? "IV access already established, doctor."
+        : "We have IO access, doctor. That should work.");
       return;
     }
 
-    logAction('establish_iv', { result: 'success' });
-    addMessage('nurse', "Establishing IV access... 22 gauge in the right AC. IV patent and flushing well.");
-    setIvAccess(true);
-  }, [phase, ivAccess, addMessage, logAction]);
+    // Can't start new attempt if one is in progress
+    if (ivAccessState === 'ATTEMPTING' || ivAccessState === 'ATTEMPTING_SECOND') {
+      addMessage('nurse', "I'm working on it, doctor. Give me a moment.");
+      return;
+    }
+
+    // Get available sites
+    const availableSites = getAvailableSites(ivAttempts);
+    if (availableSites.length === 0) {
+      addMessage('nurse', "Doctor, I've tried all the peripheral sites. We need to go IO.");
+      setShowIOChoice(true);
+      return;
+    }
+
+    // Start IV attempt
+    const attemptNum = ivAttempts.length + 1;
+    const site = availableSites[0];
+    const duration = getIVAttemptDuration(attemptNum);
+
+    // Roll outcome now (will be revealed after duration)
+    const outcome = rollIVOutcome(attemptNum);
+
+    setCurrentIVSite(site);
+    setIvAttemptStart(elapsed);
+    setIvAttemptDuration(duration);
+    setPendingIVOutcome(outcome);
+    setIvAccessState(attemptNum === 1 ? 'ATTEMPTING' : 'ATTEMPTING_SECOND');
+
+    // Starting dialogue
+    const formattedSite = formatSiteName(site);
+    addMessage('nurse', getIVNurseDialogue('starting', attemptNum, formattedSite));
+    logAction('establish_iv', { result: 'pending' });
+
+    // Lily's initial reaction
+    setTimeout(() => {
+      const reaction = attemptNum === 1
+        ? getLilyIVReaction('poke', lilyFear)
+        : getLilyIVReaction('second_poke', lilyFear);
+      addMessage('lily', reaction);
+      setLilyFear(f => Math.min(5, f + 0.5));
+    }, 500);
+
+    // Mark watching
+    setTimeout(() => {
+      addMessage('mark', getMarkIVReaction('watching', markAnxiety));
+    }, 1500);
+
+  }, [phase, ivAccess, ioAccess, ivAccessState, ivAttempts, elapsed, lilyFear, markAnxiety, addMessage, logAction]);
+
+  // Establish IO access
+  const establishIO = useCallback(() => {
+    if (phase !== 'RUNNING') return;
+
+    if (ivAccess || ioAccess) {
+      addMessage('nurse', ioAccess
+        ? "IO already established, doctor."
+        : "We already have IV access, doctor.");
+      return;
+    }
+
+    if (ioAccessState !== 'NOT_ATTEMPTED') {
+      addMessage('nurse', "IO is in progress, doctor.");
+      return;
+    }
+
+    setShowIOChoice(false);
+    setIoAccessState('PREPARING');
+    logAction('establish_io', { result: 'pending' });
+
+    // Preparation phase
+    addMessage('nurse', getIONurseDialogue('preparing'));
+
+    setTimeout(() => {
+      addMessage('nurse', getIONurseDialogue('warning'));
+      addMessage('lily', getLilyIOReaction('warning'));
+      setLilyFear(5); // Max fear for IO
+    }, IO_TIMING.PREPARATION);
+
+    // Drilling phase
+    setTimeout(() => {
+      setIoAccessState('DRILLING');
+      addMessage('nurse', getIONurseDialogue('drilling'));
+      addMessage('lily', getLilyIOReaction('drilling'));
+
+      // Mark's reaction (random if stays or leaves)
+      const staysInRoom = Math.random() > 0.4; // 60% chance to stay
+      addMessage('mark', getMarkIOReaction('during', staysInRoom));
+      setMarkAnxiety(5); // Max anxiety
+    }, IO_TIMING.PREPARATION + 2000);
+
+    // Confirmation phase
+    setTimeout(() => {
+      setIoAccessState('CONFIRMING');
+      addMessage('nurse', getIONurseDialogue('confirming'));
+    }, IO_TIMING.PREPARATION + IO_TIMING.DRILLING);
+
+    // Success
+    setTimeout(() => {
+      setIoAccessState('SUCCESS');
+      setIoAccess(true);
+      setActionLog(prev => prev.map((a, i) =>
+        i === prev.length - 1 && a.type === 'establish_io'
+          ? { ...a, result: 'success' as const }
+          : a
+      ));
+      addMessage('nurse', getIONurseDialogue('success'));
+      addMessage('lily', getLilyIOReaction('after'));
+      addMessage('mark', getMarkIOReaction('after', true));
+    }, IO_TIMING.PREPARATION + IO_TIMING.DRILLING + IO_TIMING.CONFIRMATION);
+
+  }, [phase, ivAccess, ioAccess, ioAccessState, addMessage, logAction]);
+
+  // Continue IV (user chose to keep trying instead of IO)
+  const continueIV = useCallback(() => {
+    setShowIOChoice(false);
+    establishIV();
+  }, [establishIV]);
+
+  // Cancel IV choice dialog
+  const cancelIOChoice = useCallback(() => {
+    setShowIOChoice(false);
+  }, []);
 
   // Sedate - now uses state machine for realistic timing
   const sedate = useCallback(() => {
@@ -979,6 +1139,98 @@ export function useSimulation() {
     }
   }, [elapsed, adenosinePhase, adenosinePhaseStart, adenosineCount, currentAdenosineDose]);
 
+  // IV attempt timing and outcome
+  useEffect(() => {
+    if (ivAccessState !== 'ATTEMPTING' && ivAccessState !== 'ATTEMPTING_SECOND') return;
+    // Use explicit null checks - 0 is a valid elapsed time!
+    if (ivAttemptStart === null || pendingIVOutcome === null || currentIVSite === null) return;
+
+    const timeInAttempt = elapsed - ivAttemptStart;
+
+    // Show working dialogue at 1/3 and 2/3 through
+    if (timeInAttempt > ivAttemptDuration * 0.33 && timeInAttempt < ivAttemptDuration * 0.4) {
+      // Working dialogue (once per attempt)
+    }
+
+    // Reveal outcome when attempt duration complete
+    if (timeInAttempt >= ivAttemptDuration) {
+      const attemptNum = ivAttempts.length + 1;
+      const formattedSite = formatSiteName(currentIVSite);
+
+      // Record the attempt
+      const attempt: IVAttempt = {
+        site: currentIVSite as IVAttempt['site'],
+        success: pendingIVOutcome.success,
+        reason: pendingIVOutcome.reason as IVAttempt['reason'],
+        duration: ivAttemptDuration,
+      };
+      setIvAttempts(prev => [...prev, attempt]);
+
+      if (pendingIVOutcome.success) {
+        // SUCCESS!
+        setIvAccessState('SUCCESS');
+        setIvAccess(true);
+        setActionLog(prev => prev.map((a, i) =>
+          i === prev.length - 1 && a.type === 'establish_iv'
+            ? { ...a, result: 'success' as const }
+            : a
+        ));
+        addMessage('nurse', getIVNurseDialogue('success', attemptNum, formattedSite));
+        addMessage('lily', getLilyIVReaction('success', lilyFear));
+        setTimeout(() => {
+          addMessage('mark', getMarkIVReaction('success', markAnxiety));
+        }, 800);
+
+      } else if (pendingIVOutcome.difficult) {
+        // Difficult access - offer IO choice
+        setIvAccessState('DIFFICULT');
+        setActionLog(prev => prev.map((a, i) =>
+          i === prev.length - 1 && a.type === 'establish_iv'
+            ? { ...a, result: 'failed' as const }
+            : a
+        ));
+        addMessage('nurse', getIVNurseDialogue('difficult', attemptNum, formattedSite, pendingIVOutcome.reason));
+        addMessage('lily', getLilyIVReaction('failed', lilyFear));
+        setLilyFear(f => Math.min(5, f + 0.5));
+        setTimeout(() => {
+          addMessage('mark', getMarkIVReaction('difficult', markAnxiety));
+          setMarkAnxiety(a => Math.min(5, a + 0.5));
+          setShowIOChoice(true);
+        }, 1000);
+
+      } else {
+        // Failed but can retry
+        const availableSites = getAvailableSites([...ivAttempts, attempt]);
+
+        if (availableSites.length === 0) {
+          // No more sites - must go IO
+          setIvAccessState('FAILED_ALL');
+          addMessage('nurse', "Doctor, I've tried all the peripheral sites. We need to go IO.");
+          setShowIOChoice(true);
+        } else {
+          setIvAccessState('FAILED_FIRST');
+          setActionLog(prev => prev.map((a, i) =>
+            i === prev.length - 1 && a.type === 'establish_iv'
+              ? { ...a, result: 'failed' as const }
+              : a
+          ));
+          addMessage('nurse', getIVNurseDialogue('failed', attemptNum, formattedSite, pendingIVOutcome.reason));
+          addMessage('lily', getLilyIVReaction('failed', lilyFear));
+          setLilyFear(f => Math.min(5, f + 0.5));
+          setTimeout(() => {
+            addMessage('mark', getMarkIVReaction('failed', markAnxiety));
+            setMarkAnxiety(a => Math.min(5, a + 0.5));
+          }, 800);
+        }
+      }
+
+      // Clear attempt state
+      setPendingIVOutcome(null);
+      setCurrentIVSite(null);
+      setIvAttemptStart(null);
+    }
+  }, [elapsed, ivAccessState, ivAttemptStart, ivAttemptDuration, pendingIVOutcome, currentIVSite, ivAttempts, lilyFear, markAnxiety, addMessage]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -1011,6 +1263,12 @@ export function useSimulation() {
     sedationState,
     adenosinePhase,
 
+    // IV/IO procedure state
+    ivAccessState,
+    ioAccessState,
+    ivAttempts,
+    showIOChoice,
+
     // Debrief data
     actionLog,
     nurseCatches,
@@ -1030,6 +1288,9 @@ export function useSimulation() {
     cardiovert,
     sedate,
     establishIV,
+    establishIO,
+    continueIV,
+    cancelIOChoice,
     speak,
     confirmPending,
     cancelPending,
