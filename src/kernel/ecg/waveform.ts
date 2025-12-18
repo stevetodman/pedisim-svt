@@ -18,6 +18,22 @@ function gaussian(x: number, center: number, width: number): number {
 }
 
 /**
+ * Delta wave function - characteristic slurred upstroke of WPW
+ * Unlike Gaussian, the delta wave has:
+ * - Slow slurred rise (the "delta" appearance)
+ * - Merges into the main QRS
+ */
+function deltaWaveShape(x: number, onset: number, duration: number): number {
+  if (x < onset || x > onset + duration) return 0;
+
+  const progress = (x - onset) / duration;
+
+  // Slurred upstroke using square root function
+  // This gives the characteristic slow initial rise
+  return Math.pow(progress, 0.6);
+}
+
+/**
  * Calculate amplitude at a given time point within the cardiac cycle
  * using the morphology definition
  */
@@ -26,12 +42,17 @@ function calculateAmplitudeAtTime(
   timeInCycle: number  // ms from start of cardiac cycle
 ): number {
   let amplitude = 0;
-  const { pWave, qWave, rWave, sPrime, sWave, tWave, stDeviation } = morphology;
+  const { pWave, deltaWave, qWave, rWave, sPrime, sWave, tWave, stDeviation } = morphology;
 
   // P wave
   if (pWave && pWave.amplitude !== 0) {
     const center = pWave.onset + pWave.duration / 2;
     amplitude += pWave.amplitude * gaussian(timeInCycle, center, pWave.duration);
+  }
+
+  // Delta wave (WPW pre-excitation) - slurred upstroke before main QRS
+  if (deltaWave && deltaWave.amplitude !== 0) {
+    amplitude += deltaWave.amplitude * deltaWaveShape(timeInCycle, deltaWave.onset, deltaWave.duration);
   }
 
   // Q wave

@@ -490,7 +490,7 @@ export default function App() {
             age: sim.patient.age,
             weight: sim.patient.weight,
           }}
-          rhythm={sim.rhythm}
+          rhythm={sim.wpwRevealed && sim.rhythm === 'SINUS' ? 'WPW_SINUS' : sim.rhythm}
           heartRate={sim.vitals.hr}
           onClose={() => setShowECG(false)}
         />
@@ -638,6 +638,19 @@ export default function App() {
             >
               📊 Get 15-Lead ECG
             </button>
+
+            {/* Follow-up ECG button - only after conversion */}
+            {sim.phase === 'CONVERTED' && !sim.wpwRevealed && (
+              <button
+                onClick={() => {
+                  sim.orderFollowUpECG();
+                  setShowECG(true);
+                }}
+                className="w-full p-1.5 rounded bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-[10px] font-bold text-amber-400 mt-1 animate-pulse"
+              >
+                📋 Get Follow-up ECG
+              </button>
+            )}
           </div>
 
           <div className="bg-slate-800/50 rounded-lg p-2 text-xs text-slate-600">

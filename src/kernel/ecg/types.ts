@@ -27,7 +27,8 @@ export const STANDARD_GRID: LeadName[][] = [
 export const PEDIATRIC_LEADS: LeadName[] = ['V3R', 'V4R', 'V7'];
 
 // Rhythm type (matches existing kernel/types.ts)
-export type Rhythm = 'SVT' | 'SINUS' | 'ASYSTOLE';
+// WPW_SINUS = Sinus rhythm with Wolff-Parkinson-White pre-excitation pattern
+export type Rhythm = 'SVT' | 'SINUS' | 'ASYSTOLE' | 'WPW_SINUS';
 
 /**
  * Wave component - defines a single ECG wave (P, Q, R, S, or T)
@@ -43,6 +44,7 @@ export interface WaveComponent {
  */
 export interface LeadMorphology {
   pWave: WaveComponent | null;      // null = absent (e.g., in SVT)
+  deltaWave: WaveComponent | null;  // Pre-excitation wave (WPW) - slurred QRS upstroke
   qWave: WaveComponent | null;
   rWave: WaveComponent;
   sPrime: WaveComponent | null;     // For rSR' pattern (e.g., V1 in SVT)
@@ -151,4 +153,7 @@ export interface ECGInterpretation {
   intervals: string;
   axis: string;
   summary: string;
+  findings?: string[];           // Additional findings (e.g., "Delta wave present")
+  isAbnormal?: boolean;          // Flags abnormal ECG
+  requiresAction?: boolean;      // Needs cardiology referral
 }

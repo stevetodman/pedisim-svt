@@ -11,7 +11,7 @@ import {
   Rhythm,
   PEDIATRIC_NORMALS_5YO,
 } from './types';
-import { SVT_MORPHOLOGY, SINUS_MORPHOLOGY } from './morphology';
+import { SVT_MORPHOLOGY, SINUS_MORPHOLOGY, WPW_SINUS_MORPHOLOGY } from './morphology';
 
 /**
  * Calculate ECG measurements for a given rhythm and heart rate
@@ -37,7 +37,18 @@ export function calculateMeasurements(
     };
   }
 
-  const morphology = rhythm === 'SVT' ? SVT_MORPHOLOGY : SINUS_MORPHOLOGY;
+  // Select morphology based on rhythm
+  let morphology;
+  switch (rhythm) {
+    case 'SVT':
+      morphology = SVT_MORPHOLOGY;
+      break;
+    case 'WPW_SINUS':
+      morphology = WPW_SINUS_MORPHOLOGY;
+      break;
+    default:
+      morphology = SINUS_MORPHOLOGY;
+  }
   const leadII = morphology['II'];
 
   // Calculate intervals from Lead II morphology
@@ -45,15 +56,17 @@ export function calculateMeasurements(
   let qrsDuration: number;
   let qtInterval: number;
 
-  if (rhythm === 'SINUS' && leadII.pWave) {
-    // PR interval = start of P to start of QRS
+  if ((rhythm === 'SINUS' || rhythm === 'WPW_SINUS') && leadII.pWave) {
+    // PR interval = start of P to start of QRS (or delta wave in WPW)
     const pStart = leadII.pWave.onset;
-    const qrsStart = leadII.qWave?.onset ?? leadII.rWave.onset;
+    // In WPW, delta wave is the start of ventricular activation
+    const qrsStart = leadII.deltaWave?.onset ?? leadII.qWave?.onset ?? leadII.rWave.onset;
     prInterval = qrsStart - pStart;
   }
 
   // QRS duration from Lead II
-  const qrsStart = leadII.qWave?.onset ?? leadII.rWave.onset;
+  // In WPW, QRS includes the delta wave
+  const qrsStart = leadII.deltaWave?.onset ?? leadII.qWave?.onset ?? leadII.rWave.onset;
   const qrsEnd = leadII.sWave
     ? leadII.sWave.onset + leadII.sWave.duration
     : leadII.rWave.onset + leadII.rWave.duration;
@@ -157,6 +170,28 @@ export function generateInterpretation(
         summary = `✓ ${rhythmText} - Rate ${heartRate}, Normal intervals`;
       }
       break;
+
+    case 'WPW_SINUS':
+      rhythmText = 'SINUS RHYTHM WITH WPW PATTERN';
+      rateText = `Ventricular rate ${heartRate} bpm`;
+      intervalsText = `PR: ${measurements.prInterval}ms (SHORT) | QRS: ${measurements.qrsDuration}ms (WIDE) | QT/QTc: ${measurements.qtInterval}/${measurements.qtcBazett}ms`;
+      axisText = `Axis: ${measurements.axis}°`;
+      summary = `⚠️ WOLFF-PARKINSON-WHITE PATTERN - Short PR (${measurements.prInterval}ms), Delta waves present, Wide QRS (${measurements.qrsDuration}ms) → REFER TO PEDIATRIC CARDIOLOGY`;
+      return {
+        rhythm: rhythmText,
+        rate: rateText,
+        intervals: intervalsText,
+        axis: axisText,
+        summary,
+        findings: [
+          'Pre-excitation pattern consistent with WPW syndrome',
+          'Type A morphology (positive delta in V1) suggests left-sided accessory pathway',
+          'This explains the underlying cause of the SVT episode',
+          'Patient requires pediatric cardiology evaluation',
+        ],
+        isAbnormal: true,
+        requiresAction: true,
+      };
 
     case 'ASYSTOLE':
       rhythmText = 'ASYSTOLE';

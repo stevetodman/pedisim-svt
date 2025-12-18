@@ -99,6 +99,10 @@ export function useSimulation() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [asystoleActive, setAsystoleActive] = useState(false);
 
+  // WPW follow-up ECG state
+  // After conversion, ordering a follow-up ECG reveals the underlying WPW pattern
+  const [wpwRevealed, setWpwRevealed] = useState(false);
+
   // State snapshots for evaluation
   const [stateSnapshots, setStateSnapshots] = useState<StateSnapshot[]>([]);
   const startTimeRef = useRef<number>(0);
@@ -648,6 +652,16 @@ export function useSimulation() {
     return Math.max(0, Math.min(100, score));
   }, [actionLog, timeToConversion, commLog, nurseCatches]);
 
+  // Order follow-up ECG - reveals underlying WPW after conversion
+  const orderFollowUpECG = useCallback(() => {
+    if (phase !== 'CONVERTED') return;
+    if (wpwRevealed) return; // Already ordered
+
+    setWpwRevealed(true);
+    logAction('followup_ecg', {});
+    addMessage('nurse', "Doctor, look at this follow-up ECG - there's a delta wave. This looks like WPW syndrome. That explains the SVT.");
+  }, [phase, wpwRevealed, logAction, addMessage]);
+
   // Get evaluation input data for debrief analysis
   const getEvaluationInput = useCallback((): ReconstructionInput => {
     return {
@@ -711,6 +725,7 @@ export function useSimulation() {
     lilyFear,
     pendingAction,
     isGenerating,
+    wpwRevealed,
     patient: PATIENT,
 
     // Debrief data
@@ -736,5 +751,6 @@ export function useSimulation() {
     confirmPending,
     cancelPending,
     captureSnapshot,
+    orderFollowUpECG,
   };
 }
