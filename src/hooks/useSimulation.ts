@@ -4,6 +4,9 @@
 // ============================================================================
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+
+// Vagal maneuver technique types
+export type VagalTechnique = 'valsalva' | 'blow_thumb' | 'bearing_down' | 'gag';
 import { AudioEngine } from '../audio';
 import {
   evaluateAdenosineOrder,
@@ -15,6 +18,21 @@ import { StateSnapshot } from '../kernel/evaluation/types';
 import { ReconstructionInput } from '../kernel/evaluation/timeline';
 import { getCharacterResponse, DialogueRequest } from '../api/characterAI';
 import { CharacterState } from '../characters';
+import {
+  calculateSVTVitals,
+  calculateAsystoleVitals,
+  calculateRecoveryVitals,
+  getDeteriorationStage,
+  formatBP,
+  type DeteriorationState,
+} from '../kernel/deterioration';
+import {
+  type SedationState,
+  type AdenosinePhase,
+  getNextSedationState,
+  getSedationPhaseDuration,
+  getAdenosinePhaseDuration,
+} from '../kernel/pharmacokinetics';
 
 // Types
 export type SimPhase = 'IDLE' | 'RUNNING' | 'ASYSTOLE' | 'CONVERTED';
@@ -102,6 +120,20 @@ export function useSimulation() {
   // WPW follow-up ECG state
   // After conversion, ordering a follow-up ECG reveals the underlying WPW pattern
   const [wpwRevealed, setWpwRevealed] = useState(false);
+
+  // Physiologic realism state
+  const [deteriorationStage, setDeteriorationStage] = useState<DeteriorationState['stage']>('compensated');
+  const [conversionTime, setConversionTime] = useState<number | null>(null);  // When conversion happened
+
+  // Sedation state machine
+  const [sedationState, setSedationState] = useState<SedationState>('NONE');
+  const [sedationPhaseStart, setSedationPhaseStart] = useState<number>(0);
+  const sedationMessagesShownRef = useRef<Set<string>>(new Set());
+
+  // Adenosine state machine
+  const [adenosinePhase, setAdenosinePhase] = useState<AdenosinePhase>('NONE');
+  const [adenosinePhaseStart, setAdenosinePhaseStart] = useState<number>(0);
+  const [currentAdenosineDose, setCurrentAdenosineDose] = useState<number>(0);
 
   // State snapshots for evaluation
   const [stateSnapshots, setStateSnapshots] = useState<StateSnapshot[]>([]);
@@ -254,6 +286,17 @@ export function useSimulation() {
     setTimeToConversion(null);
     setAsystoleActive(false);
     setStateSnapshots([]);
+    setWpwRevealed(false);
+
+    // Reset physiologic realism state
+    setDeteriorationStage('compensated');
+    setConversionTime(null);
+    setSedationState('NONE');
+    setSedationPhaseStart(0);
+    sedationMessagesShownRef.current = new Set();
+    setAdenosinePhase('NONE');
+    setAdenosinePhaseStart(0);
+    setCurrentAdenosineDose(0);
 
     // Record start time
     startTimeRef.current = Date.now();
@@ -293,28 +336,38 @@ export function useSimulation() {
     setPendingAction(null);
   }, []);
 
-  // Convert to sinus
+  // Convert to sinus - now uses recovery curve for realistic HR normalization
   const convertToSinus = useCallback((nurseComment: string) => {
     setTimeToConversion(elapsed);
+    setConversionTime(elapsed);  // Start recovery curve
     setPhase('CONVERTED');
     setRhythm('SINUS');
-    const newHR = 85 + Math.floor(Math.random() * 15);
-    setVitals({ hr: newHR, spo2: 99, bp: '98/62', rr: 22 });
+
+    // Initial vitals will be set by the recovery curve in the useEffect
+    // Start with junctional escape values
+    setVitals({ hr: 50, spo2: 94, bp: '85/52', rr: 28 });
     setMarkAnxiety(2);
     setLilyFear(2);
-    
+
     audioRef.current?.stopAll();
     audioRef.current?.playSuccess();
-    setTimeout(() => audioRef.current?.startHeartbeat(newHR, false), 500);
-    
-    addMessage('nurse', `Sinus rhythm at ${newHR}. ${nurseComment}`);
-    setTimeout(() => addMessage('lily', "The drum stopped! I feel better daddy!"), 1500);
-    setTimeout(() => addMessage('mark', "Oh thank god... is she okay now?"), 3000);
-    
-    if (timerRef.current) clearInterval(timerRef.current);
+
+    // Start heartbeat at a low rate initially, will increase with recovery
+    setTimeout(() => audioRef.current?.startHeartbeat(60, false), 500);
+    // Update to normal rate after recovery
+    setTimeout(() => audioRef.current?.startHeartbeat(90, false), 10000);
+
+    addMessage('nurse', `Converting... ${nurseComment}`);
+    setTimeout(() => addMessage('nurse', "Junctional escape... now sinus bradycardia... rate coming up nicely."), 3000);
+    setTimeout(() => addMessage('lily', "The drum stopped... I feel tired but... better..."), 5000);
+    setTimeout(() => addMessage('mark', "Oh thank god... is she okay now? Why is her heart still slow?"), 7000);
+    setTimeout(() => addMessage('nurse', "Her heart rate is normalizing. This is a normal recovery pattern. She's doing great."), 9000);
+
+    // Don't stop the timer - we need it for the recovery curve vitals
+    // Timer will continue running to update the recovery vitals
   }, [elapsed, addMessage]);
 
-  // Execute adenosine
+  // Execute adenosine - now uses phase-based state machine for realistic timing
   const executeAdenosine = useCallback((dose: number) => {
     const isSecond = adenosineCount > 0;
     const correctDose = isSecond ? PATIENT.weight * 0.2 : PATIENT.weight * 0.1;
@@ -328,65 +381,19 @@ export function useSimulation() {
     });
     setAdenosineCount(c => c + 1);
 
-    setTimeout(() => addMessage('lily', "I feel weird... something's happening..."), 1500);
+    // Store the dose for later use in phase progression
+    setCurrentAdenosineDose(dose);
 
-    setTimeout(() => {
-      setPhase('ASYSTOLE');
-      setRhythm('ASYSTOLE');
-      setVitals(v => ({ ...v, hr: 0 }));
-      audioRef.current?.startFlatline();
-      setMarkAnxiety(5);
-      setLilyFear(5);
-      setAsystoleActive(true);
+    // Start the adenosine phase state machine
+    setAdenosinePhase('ORDERED');
+    setAdenosinePhaseStart(elapsed);
 
-      setTimeout(() => addMessage('mark', "OH MY GOD! THE LINE IS FLAT! HER HEART STOPPED!!"), 300);
-      setTimeout(() => addMessage('nurse', "Transient asystole - this is expected. Watching for conversion..."), 1700);
-
-      const successRate = calcAdenosineSuccess(dose, isSecond, PATIENT.weight);
-      const willConvert = Math.random() < successRate;
-      const asystoleDuration = 3000 + Math.random() * 3000;
-
-      setTimeout(() => {
-        audioRef.current?.stopFlatline();
-        setAsystoleActive(false);
-
-        if (willConvert) {
-          setActionLog(prev => prev.map((a, i) => 
-            i === prev.length - 1 ? { ...a, result: 'success' as const } : a
-          ));
-          convertToSinus("Adenosine worked - nice!");
-        } else {
-          setActionLog(prev => prev.map((a, i) => 
-            i === prev.length - 1 ? { ...a, result: 'failed' as const } : a
-          ));
-          setPhase('RUNNING');
-          setRhythm('SVT');
-          const newHR = 215 - Math.floor(Math.random() * 15);
-          setVitals(v => ({ ...v, hr: newHR }));
-          setMarkAnxiety(4);
-
-          audioRef.current?.playError();
-          setTimeout(() => {
-            audioRef.current?.startHeartbeat(newHR, true);
-            audioRef.current?.startAlarm();
-          }, 200);
-
-          addMessage('lily', "*crying* It still hurts! Make it stop!");
-          setTimeout(() => addMessage('mark', "It didn't work?! What now?!"), 1000);
-          setTimeout(() => {
-            if (adenosineCount >= 2) {
-              addMessage('nurse', `Back in SVT at ${newHR}. We've given two doses - PALS suggests cardioversion. Want me to get pads ready?`);
-            } else {
-              addMessage('nurse', `Back in SVT at ${newHR}. Second dose is 0.2mg/kg = 3.7mg. Your call, doctor.`);
-            }
-          }, 2500);
-        }
-      }, asystoleDuration);
-    }, 2500);
-  }, [adenosineCount, addMessage, convertToSinus, logAction]);
+    addMessage('nurse', `Adenosine ${dose}mg ordered. Preparing with rapid flush...`);
+  }, [adenosineCount, logAction, elapsed]);
 
   // Execute cardioversion
-  const executeCardioversion = useCallback((joules: number) => {
+  // fromDefibPanel: if true, skip audio and timing (defib panel already handled it)
+  const executeCardioversion = useCallback((joules: number, fromDefibPanel = false) => {
     const attemptNum = cardioversionCount + 1;
     const correctJ = attemptNum === 1 ? PATIENT.weight * 0.5 : PATIENT.weight * 1.0;
 
@@ -399,6 +406,35 @@ export function useSimulation() {
     });
 
     setMarkAnxiety(5);
+
+    // If from defib panel, execute immediately (panel already did audio/animation)
+    if (fromDefibPanel) {
+      addMessage('system', "⚡ SHOCK DELIVERED");
+      setCardioversionCount(c => c + 1);
+
+      const successRate = calcCardioversionSuccess(joules, attemptNum, PATIENT.weight);
+
+      // Small delay for outcome
+      setTimeout(() => {
+        if (Math.random() < successRate) {
+          setActionLog(prev => prev.map((a, i) =>
+            i === prev.length - 1 ? { ...a, result: 'success' as const } : a
+          ));
+          convertToSinus("Cardioversion successful! Converting to sinus rhythm.");
+        } else {
+          setActionLog(prev => prev.map((a, i) =>
+            i === prev.length - 1 ? { ...a, result: 'failed' as const } : a
+          ));
+          const newHR = 212 - Math.floor(Math.random() * 10);
+          setVitals(v => ({ ...v, hr: newHR }));
+          addMessage('nurse', `Still in SVT at ${newHR}. May need to increase energy - try ${Math.round(PATIENT.weight * 1.0)}J or higher.`);
+          addMessage('mark', "You shocked her and nothing happened?!");
+        }
+      }, 500);
+      return;
+    }
+
+    // Legacy flow with audio (for non-defib panel use)
     audioRef.current?.playCharge();
 
     setTimeout(() => {
@@ -410,12 +446,12 @@ export function useSimulation() {
 
       setTimeout(() => {
         if (Math.random() < successRate) {
-          setActionLog(prev => prev.map((a, i) => 
+          setActionLog(prev => prev.map((a, i) =>
             i === prev.length - 1 ? { ...a, result: 'success' as const } : a
           ));
           convertToSinus("Cardioversion successful.");
         } else {
-          setActionLog(prev => prev.map((a, i) => 
+          setActionLog(prev => prev.map((a, i) =>
             i === prev.length - 1 ? { ...a, result: 'failed' as const } : a
           ));
           const newHR = 212 - Math.floor(Math.random() * 10);
@@ -460,11 +496,18 @@ export function useSimulation() {
   }, [phase, ivAccess, ioAccess, adenosineCount, addMessage, logNurseCatch, executeAdenosine]);
 
   // Handle cardioversion order
-  const cardiovert = useCallback((joules: number) => {
+  // fromDefibPanel: if true, skip validation/audio (defib panel already handled it)
+  const cardiovert = useCallback((joules: number, fromDefibPanel = false) => {
     if (phase !== 'RUNNING') return;
 
     if (isNaN(joules) || joules <= 0) {
       addMessage('nurse', "Doctor, I need a valid energy setting. How many joules?");
+      return;
+    }
+
+    // When called from defib panel, skip nurse evaluation (already done in panel)
+    if (fromDefibPanel) {
+      executeCardioversion(joules, true);
       return;
     }
 
@@ -489,30 +532,65 @@ export function useSimulation() {
     }
 
     addMessage('nurse', evaluation.message);
-    executeCardioversion(joules);
+    executeCardioversion(joules, false);
   }, [phase, cardioversionCount, rhythm, sedated, addMessage, logNurseCatch, executeCardioversion]);
 
-  // Vagal maneuver
-  const doVagal = useCallback(() => {
+  // Vagal maneuver with technique selection
+  const doVagal = useCallback((technique: VagalTechnique = 'valsalva') => {
     if (phase !== 'RUNNING' || rhythm !== 'SVT') {
       if (rhythm !== 'SVT') addMessage('nurse', "She's not in SVT anymore, doctor.");
       return;
     }
 
-    addMessage('nurse', "Applying ice pack to face...");
-    logAction('vagal', { result: 'pending' });
-    setLilyFear(f => Math.min(5, f + 1));
+    // Technique-specific nurse dialogue and Lily responses
+    const techniqueDetails: Record<VagalTechnique, {
+      nurseAction: string;
+      lilyResponse: string;
+      lilyDelay: number;
+      fearIncrease: number;
+    }> = {
+      valsalva: {
+        nurseAction: "Okay Lily, I need you to blow through this straw as hard as you can and keep blowing... that's it, keep going!",
+        lilyResponse: "*blowing hard* My... face... feels... funny...",
+        lilyDelay: 800,
+        fearIncrease: 0.5
+      },
+      blow_thumb: {
+        nurseAction: "Lily, can you blow on your thumb like you're blowing up a balloon? Make it really big!",
+        lilyResponse: "*puffing cheeks* Like this? It's hard!",
+        lilyDelay: 600,
+        fearIncrease: 0.5
+      },
+      bearing_down: {
+        nurseAction: "Lily, I need you to push down really hard like you're going potty. Can you do that for me?",
+        lilyResponse: "*straining* This is weird... *grunt*",
+        lilyDelay: 700,
+        fearIncrease: 0.5
+      },
+      gag: {
+        nurseAction: "I'm going to touch the back of her throat with this tongue depressor... I know it's uncomfortable, sweetie.",
+        lilyResponse: "*gagging* STOP! I don't like that! *crying*",
+        lilyDelay: 500,
+        fearIncrease: 1.5
+      }
+    };
 
-    setTimeout(() => addMessage('lily', "COLD!! That's so cold! I don't like it! *crying*"), 800);
+    const details = techniqueDetails[technique];
+
+    addMessage('nurse', details.nurseAction);
+    logAction('vagal', { result: 'pending' });
+    setLilyFear(f => Math.min(5, f + details.fearIncrease));
+
+    setTimeout(() => addMessage('lily', details.lilyResponse), details.lilyDelay);
 
     setTimeout(() => {
       if (Math.random() < 0.25) {
-        setActionLog(prev => prev.map((a, i) => 
+        setActionLog(prev => prev.map((a, i) =>
           i === prev.length - 1 ? { ...a, result: 'success' as const } : a
         ));
         convertToSinus("Vagal maneuver worked!");
       } else {
-        setActionLog(prev => prev.map((a, i) => 
+        setActionLog(prev => prev.map((a, i) =>
           i === prev.length - 1 ? { ...a, result: 'failed' as const } : a
         ));
         addMessage('nurse', "No change. Still in SVT at 220.");
@@ -536,25 +614,32 @@ export function useSimulation() {
     setIvAccess(true);
   }, [phase, ivAccess, addMessage, logAction]);
 
-  // Sedate
+  // Sedate - now uses state machine for realistic timing
   const sedate = useCallback(() => {
-    if (phase !== 'RUNNING' || sedated) return;
+    if (phase !== 'RUNNING') return;
+
+    // Already sedated or sedation in progress
+    if (sedated || sedationState !== 'NONE') {
+      if (sedated) {
+        addMessage('nurse', "She's already sedated, doctor.");
+      } else {
+        addMessage('nurse', "Sedation is in progress, doctor. She'll be ready soon.");
+      }
+      return;
+    }
 
     if (!ivAccess && !ioAccess) {
       addMessage('nurse', "Doctor, I need IV access to give sedation.");
       return;
     }
 
-    logAction('sedation', { result: 'success' });
-    addMessage('nurse', "Pushing midazolam 1.8mg for sedation...");
+    logAction('sedation', { result: 'pending' });
+    addMessage('nurse', "Starting sedation - midazolam 0.1mg/kg = 1.8mg. This will take about 45 seconds to take full effect.");
 
-    setTimeout(() => {
-      setSedated(true);
-      setLilyFear(f => Math.max(1, f - 1));
-      addMessage('nurse', "Patient sedated. Ready for cardioversion if needed.");
-      addMessage('lily', "*getting drowsy* Daddy... I'm sleepy...");
-    }, 2000);
-  }, [phase, sedated, ivAccess, ioAccess, addMessage, logAction]);
+    // Start sedation state machine
+    setSedationState('ORDERED');
+    setSedationPhaseStart(elapsed);
+  }, [phase, sedated, sedationState, ivAccess, ioAccess, addMessage, logAction, elapsed]);
 
   // Confirm pending action
   const confirmPending = useCallback(() => {
@@ -701,6 +786,199 @@ export function useSimulation() {
     });
   }, [phase, rhythm, markAnxiety, lilyFear, sedated, adenosineCount, cardioversionCount]); // Capture all significant state changes
 
+  // Dynamic vitals update based on physiologic state
+  useEffect(() => {
+    if (phase === 'IDLE') return;
+
+    // Update vitals based on current state
+    if (phase === 'RUNNING' && rhythm === 'SVT') {
+      // Calculate time in SVT directly from elapsed (no state update loop)
+      const timeInSVT = elapsed;  // elapsed tracks total time, which equals SVT time during RUNNING
+      const newStage = getDeteriorationStage(timeInSVT);
+
+      // Only fire stage change messages once per stage
+      if (newStage !== deteriorationStage) {
+        setDeteriorationStage(newStage);
+        // Notify about deterioration
+        if (newStage === 'early_stress') {
+          addMessage('nurse', "Doctor, her perfusion is starting to look a little worse. BP trending down.");
+        } else if (newStage === 'moderate_stress') {
+          addMessage('nurse', "She's getting tachypneic and her cap refill is delayed. We should move faster.");
+        } else if (newStage === 'decompensating') {
+          addMessage('nurse', "Doctor, she's decompensating. BP is dropping, she's getting mottled. We need to convert her NOW.");
+          addMessage('mark', "Why is she looking so pale?! What's happening?!");
+        } else if (newStage === 'critical') {
+          addMessage('nurse', "CRITICAL - altered mental status, severe hypotension. Consider immediate cardioversion!");
+        }
+      }
+
+      // Calculate and set new vitals (only every 500ms to reduce updates)
+      if (elapsed % 500 === 0) {
+        const newVitals = calculateSVTVitals(timeInSVT);
+        setVitals({
+          hr: newVitals.hr,
+          spo2: newVitals.spo2,
+          bp: formatBP(newVitals.systolic, newVitals.diastolic),
+          rr: newVitals.rr,
+        });
+      }
+    } else if (phase === 'ASYSTOLE') {
+      // Calculate asystole vitals
+      const asystoleTime = elapsed - (adenosinePhaseStart || elapsed);
+      const newVitals = calculateAsystoleVitals(asystoleTime);
+      setVitals({
+        hr: 0,
+        spo2: newVitals.spo2,
+        bp: '--/--',
+        rr: 0,
+      });
+    } else if (phase === 'CONVERTED' && conversionTime !== null) {
+      // Recovery curve after conversion (update every 500ms)
+      if (elapsed % 500 === 0) {
+        const timeSinceConversion = elapsed - conversionTime;
+        const recoveryVitals = calculateRecoveryVitals(timeSinceConversion);
+        setVitals({
+          hr: recoveryVitals.hr,
+          spo2: recoveryVitals.spo2,
+          bp: formatBP(recoveryVitals.systolic, recoveryVitals.diastolic),
+          rr: recoveryVitals.rr,
+        });
+      }
+    }
+  }, [elapsed, phase, rhythm, deteriorationStage, conversionTime, adenosinePhaseStart]);
+
+  // Sedation state machine progression
+  useEffect(() => {
+    if (sedationState === 'NONE' || sedationState === 'SEDATED') return;
+
+    const phaseDuration = getSedationPhaseDuration(sedationState);
+    const timeInPhase = elapsed - sedationPhaseStart;
+
+    if (timeInPhase >= phaseDuration) {
+      const nextState = getNextSedationState(sedationState);
+      setSedationState(nextState);
+      setSedationPhaseStart(elapsed);
+
+      // Phase transition messages
+      if (nextState === 'DRAWING') {
+        addMessage('nurse', "Drawing up midazolam 1.8mg...");
+      } else if (nextState === 'ADMINISTERING') {
+        addMessage('nurse', "Pushing sedation now...");
+      } else if (nextState === 'ONSET') {
+        addMessage('lily', "Daddy... I feel... floaty...");
+      } else if (nextState === 'SEDATED') {
+        setSedated(true);
+        setLilyFear(f => Math.max(1, f - 2));
+        addMessage('nurse', "She's adequately sedated now. Ready for cardioversion if needed.");
+        addMessage('lily', "*eyes closed, breathing steadily*");
+      }
+    } else if (sedationState === 'ONSET') {
+      // During onset, show progressive sedation based on time
+      const progress = timeInPhase / phaseDuration;
+
+      // Use ref pattern to track shown messages (avoid re-render loops)
+      if (progress > 0.3 && !sedationMessagesShownRef.current.has('drowsy1')) {
+        sedationMessagesShownRef.current.add('drowsy1');
+        addMessage('lily', "I'm... sleepy... daddy...");
+      }
+      if (progress > 0.6 && !sedationMessagesShownRef.current.has('drowsy2')) {
+        sedationMessagesShownRef.current.add('drowsy2');
+        addMessage('nurse', "She's getting drowsy, almost there...");
+      }
+    }
+  }, [elapsed, sedationState, sedationPhaseStart, addMessage]);
+
+  // Adenosine phase progression
+  useEffect(() => {
+    if (adenosinePhase === 'NONE' || adenosinePhase === 'COMPLETE') return;
+
+    const phaseDuration = getAdenosinePhaseDuration(adenosinePhase);
+    const timeInPhase = elapsed - adenosinePhaseStart;
+
+    if (timeInPhase >= phaseDuration) {
+      // Progress to next phase
+      const phases: AdenosinePhase[] = ['ORDERED', 'DRAWING', 'READY', 'PUSHED', 'CIRCULATING', 'EFFECT', 'CLEARING', 'COMPLETE'];
+      const currentIdx = phases.indexOf(adenosinePhase);
+      if (currentIdx < phases.length - 1) {
+        const nextPhase = phases[currentIdx + 1];
+        setAdenosinePhase(nextPhase);
+        setAdenosinePhaseStart(elapsed);
+
+        // Phase-specific actions
+        if (nextPhase === 'DRAWING') {
+          addMessage('nurse', "Drawing adenosine and preparing flush...");
+        } else if (nextPhase === 'READY') {
+          addMessage('nurse', "Ready with adenosine and 10mL flush. Stopcock positioned.");
+        } else if (nextPhase === 'PUSHED') {
+          addMessage('nurse', "Adenosine IN... FLUSH!");
+          setTimeout(() => addMessage('lily', "That feels warm... weird..."), 500);
+        } else if (nextPhase === 'CIRCULATING') {
+          addMessage('lily', "My chest... feels tight... I can't breathe!");
+        } else if (nextPhase === 'EFFECT') {
+          // Asystole begins
+          setPhase('ASYSTOLE');
+          setRhythm('ASYSTOLE');
+          audioRef.current?.startFlatline();
+          setMarkAnxiety(5);
+          setLilyFear(5);
+          setAsystoleActive(true);
+          addMessage('mark', "OH MY GOD! THE LINE IS FLAT! HER HEART STOPPED!!");
+          setTimeout(() => addMessage('nurse', "Transient asystole - this is expected with adenosine. Watching..."), 1500);
+        } else if (nextPhase === 'CLEARING') {
+          // Asystole ending, check for success
+          audioRef.current?.stopFlatline();
+          setAsystoleActive(false);
+
+          const isSecond = adenosineCount > 1;
+          const successRate = calcAdenosineSuccess(currentAdenosineDose, isSecond, PATIENT.weight);
+          const willConvert = Math.random() < successRate;
+
+          if (willConvert) {
+            setActionLog(prev => prev.map((a, i) =>
+              i === prev.length - 1 ? { ...a, result: 'success' as const } : a
+            ));
+            // Start recovery
+            setConversionTime(elapsed);
+            setTimeToConversion(elapsed);
+            setPhase('CONVERTED');
+            setRhythm('SINUS');
+            setMarkAnxiety(2);
+            setLilyFear(2);
+            audioRef.current?.playSuccess();
+            addMessage('nurse', "Converting... there's sinus! Adenosine worked!");
+            setTimeout(() => addMessage('lily', "The drum stopped! I feel... tired but better..."), 2000);
+            setTimeout(() => addMessage('mark', "Oh thank god... is she okay now?"), 3500);
+            if (timerRef.current) clearInterval(timerRef.current);
+          } else {
+            setActionLog(prev => prev.map((a, i) =>
+              i === prev.length - 1 ? { ...a, result: 'failed' as const } : a
+            ));
+            // Back to SVT
+            setPhase('RUNNING');
+            setRhythm('SVT');
+            setMarkAnxiety(4);
+            audioRef.current?.playError();
+            setTimeout(() => {
+              audioRef.current?.startHeartbeat(215, true);
+              audioRef.current?.startAlarm();
+            }, 200);
+            addMessage('lily', "*crying* It still hurts! Make it stop!");
+            setTimeout(() => addMessage('mark', "It didn't work?! What now?!"), 1000);
+            setTimeout(() => {
+              if (adenosineCount >= 2) {
+                addMessage('nurse', "Back in SVT. We've given two doses - PALS suggests cardioversion. Want me to get pads ready?");
+              } else {
+                addMessage('nurse', "Back in SVT. Second dose is 0.2mg/kg = 3.7mg. Your call, doctor.");
+              }
+            }, 2500);
+          }
+        } else if (nextPhase === 'COMPLETE') {
+          setAdenosinePhase('NONE');
+        }
+      }
+    }
+  }, [elapsed, adenosinePhase, adenosinePhaseStart, adenosineCount, currentAdenosineDose]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -728,6 +1006,11 @@ export function useSimulation() {
     wpwRevealed,
     patient: PATIENT,
 
+    // Physiologic realism state
+    deteriorationStage,
+    sedationState,
+    adenosinePhase,
+
     // Debrief data
     actionLog,
     nurseCatches,
@@ -752,5 +1035,6 @@ export function useSimulation() {
     cancelPending,
     captureSnapshot,
     orderFollowUpECG,
+    addMessage,
   };
 }

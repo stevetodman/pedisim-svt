@@ -3,7 +3,7 @@
 // ============================================================================
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useSimulation } from './hooks/useSimulation';
+import { useSimulation, type VagalTechnique } from './hooks/useSimulation';
 import { useDebrief } from './hooks/useDebrief';
 import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
 import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
@@ -116,6 +116,29 @@ const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, rhythm, phase }) 
   const isCritical = vitals.hr > 180 || isAsystole;
   const displayHR = isAsystole ? 0 : vitals.hr;
 
+  // Determine vital sign status colors
+  const getSpo2Color = () => {
+    if (isAsystole) return 'text-red-500';
+    if (vitals.spo2 >= 95) return 'text-cyan-400';
+    if (vitals.spo2 >= 90) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  const getBPColor = () => {
+    if (isAsystole) return 'text-red-500';
+    const systolic = parseInt(vitals.bp.split('/')[0]) || 0;
+    if (systolic >= 90) return 'text-green-400';
+    if (systolic >= 70) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  const getRRColor = () => {
+    if (isAsystole) return 'text-red-500';
+    if (vitals.rr <= 30) return 'text-blue-400';
+    if (vitals.rr <= 40) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
   return (
     <div className={`bg-black rounded-xl p-3 border-2 ${isAsystole ? 'border-red-600 animate-pulse' : isCritical ? 'border-red-500' : 'border-slate-800'}`}>
       <div className="flex justify-between mb-1">
@@ -125,16 +148,30 @@ const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, rhythm, phase }) 
         </span>
       </div>
       <ECGTrace heartRate={displayHR} rhythm={isAsystole ? 'ASYSTOLE' : rhythm} />
-      <div className="flex justify-between mt-2">
+      <div className="grid grid-cols-2 gap-2 mt-2">
         <div>
-          <div className={`text-3xl font-mono font-black ${isAsystole ? 'text-red-500' : isCritical ? 'text-red-400' : 'text-green-400'}`}>
+          <div className={`text-2xl font-mono font-black ${isAsystole ? 'text-red-500' : isCritical ? 'text-red-400' : 'text-green-400'}`}>
             {isAsystole ? '---' : displayHR}
           </div>
-          <div className="text-[10px] text-slate-600">BPM</div>
+          <div className="text-[10px] text-slate-600">HR</div>
         </div>
         <div className="text-right">
-          <div className="text-xl font-mono font-black text-cyan-400">{isAsystole ? '--' : vitals.spo2}</div>
+          <div className={`text-xl font-mono font-black ${getSpo2Color()}`}>
+            {isAsystole ? '--' : vitals.spo2}
+          </div>
           <div className="text-[10px] text-cyan-600">SpO2</div>
+        </div>
+        <div>
+          <div className={`text-lg font-mono font-bold ${getBPColor()}`}>
+            {vitals.bp}
+          </div>
+          <div className="text-[10px] text-slate-600">BP</div>
+        </div>
+        <div className="text-right">
+          <div className={`text-lg font-mono font-bold ${getRRColor()}`}>
+            {isAsystole ? '--' : vitals.rr}
+          </div>
+          <div className="text-[10px] text-blue-600">RR</div>
         </div>
       </div>
     </div>
@@ -347,6 +384,7 @@ export default function App() {
   const [useEnhancedDebrief] = useState(true);
   const [adenosineDose, setAdenosineDose] = useState('1.85');
   const [showAdenosineInput, setShowAdenosineInput] = useState(false);
+  const [showVagalOptions, setShowVagalOptions] = useState(false);
   const [doctorInput, setDoctorInput] = useState('');
   const [aiModeEnabled, setAiModeEnabled] = useState<boolean | null>(null);
   const [showECG, setShowECG] = useState(false);
@@ -486,7 +524,7 @@ export default function App() {
             weight: sim.patient.weight,
           }}
           rhythm={sim.wpwRevealed && sim.rhythm === 'SINUS' ? 'WPW_SINUS' : sim.rhythm}
-          heartRate={sim.vitals.hr}
+          heartRate={sim.rhythm === 'SVT' ? 220 : sim.rhythm === 'ASYSTOLE' ? 0 : 90}
           onClose={() => setShowECG(false)}
         />
       )}
@@ -515,12 +553,13 @@ export default function App() {
             sedated={sim.sedated}
             getSimulationTime={() => sim.elapsed}
             onShockDelivered={(energy, _syncMode) => {
-              // Use the existing cardiovert function which handles the outcome
-              sim.cardiovert(energy);
-              // Close defibrillator panel after shock sequence completes
+              // Use the existing cardiovert function with fromDefibPanel=true
+              // This skips duplicate audio/timing since defib panel handled it
+              sim.cardiovert(energy, true);
+              // Close defibrillator panel after outcome displays
               setTimeout(() => {
                 setShowDefib(false);
-              }, 2000);
+              }, 1500);
             }}
             onClose={() => setShowDefib(false)}
             onNurseMessage={(_message) => {
@@ -597,6 +636,21 @@ export default function App() {
             <span className="text-xl">👧</span>
             <div className="font-bold text-sm">{sim.patient.name}</div>
             <div className="text-[10px] text-slate-500">{sim.patient.age}yo • {sim.patient.weight}kg</div>
+            {sim.phase === 'RUNNING' && sim.rhythm === 'SVT' && (
+              <div className={`text-[9px] mt-1 px-1.5 py-0.5 rounded font-bold ${
+                sim.deteriorationStage === 'compensated' ? 'bg-green-900/50 text-green-400' :
+                sim.deteriorationStage === 'early_stress' ? 'bg-yellow-900/50 text-yellow-400' :
+                sim.deteriorationStage === 'moderate_stress' ? 'bg-orange-900/50 text-orange-400' :
+                sim.deteriorationStage === 'decompensating' ? 'bg-red-900/50 text-red-400' :
+                'bg-red-900 text-red-300 animate-pulse'
+              }`}>
+                {sim.deteriorationStage === 'compensated' ? 'COMPENSATED' :
+                 sim.deteriorationStage === 'early_stress' ? 'EARLY STRESS' :
+                 sim.deteriorationStage === 'moderate_stress' ? 'MODERATE STRESS' :
+                 sim.deteriorationStage === 'decompensating' ? 'DECOMPENSATING' :
+                 'CRITICAL'}
+              </div>
+            )}
           </div>
 
           <div className="bg-slate-900 rounded-lg p-2 border border-white/5 space-y-1">
@@ -609,12 +663,53 @@ export default function App() {
             </button>
 
             <button
-              onClick={sim.doVagal}
+              onClick={() => setShowVagalOptions(!showVagalOptions)}
               disabled={!isRunning}
               className="w-full p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 disabled:opacity-30 text-[10px] font-bold text-cyan-400"
             >
-              Vagal
+              Vagal {showVagalOptions ? '▲' : '▼'}
             </button>
+            {showVagalOptions && (
+              <div className="space-y-1 p-2 bg-slate-800/80 rounded border border-cyan-500/30">
+                <p className="text-[8px] text-cyan-300/70 mb-1">Select technique for 5yo:</p>
+                {([
+                  { id: 'valsalva', label: 'Modified Valsalva', desc: 'Blow through straw', rec: true, warn: false },
+                  { id: 'blow_thumb', label: 'Blow on Thumb', desc: 'Like inflating balloon', rec: false, warn: false },
+                  { id: 'bearing_down', label: 'Bearing Down', desc: '"Push like potty"', rec: false, warn: false },
+                  { id: 'gag', label: 'Gag Reflex', desc: '⚠️ Not recommended', rec: false, warn: true },
+                ] as const).map(({ id, label, desc, rec, warn }) => (
+                  <button
+                    key={id}
+                    onClick={() => {
+                      sim.doVagal(id as VagalTechnique);
+                      setShowVagalOptions(false);
+                    }}
+                    className={`w-full p-1.5 rounded text-left text-[9px] ${
+                      warn
+                        ? 'bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300'
+                        : rec
+                          ? 'bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300'
+                          : 'bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-slate-300'
+                    }`}
+                  >
+                    <span className="font-bold">{label}</span>
+                    {rec && <span className="ml-1 text-[7px] text-cyan-400">★ RECOMMENDED</span>}
+                    <br />
+                    <span className="text-[8px] opacity-70">{desc}</span>
+                  </button>
+                ))}
+                <div className="mt-2 p-1.5 bg-red-900/30 rounded border border-red-500/30">
+                  <p className="text-[8px] text-red-300">
+                    <span className="font-bold">⛔ Carotid Massage:</span> Contraindicated in pediatrics
+                  </p>
+                </div>
+                <div className="p-1.5 bg-amber-900/20 rounded border border-amber-500/20">
+                  <p className="text-[8px] text-amber-300/80">
+                    <span className="font-bold">Note:</span> Ice to face not recommended &gt;2 years old
+                  </p>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={() => setShowAdenosineInput(!showAdenosineInput)}
@@ -638,10 +733,15 @@ export default function App() {
 
             <button
               onClick={sim.sedate}
-              disabled={!isRunning || sim.sedated}
+              disabled={!isRunning || sim.sedated || sim.sedationState !== 'NONE'}
               className="w-full p-1.5 rounded bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 disabled:opacity-30 text-[10px] font-bold text-purple-400"
             >
-              Sedate {sim.sedated && '✓'}
+              {sim.sedated ? 'Sedated ✓' :
+               sim.sedationState === 'DRAWING' ? 'Drawing...' :
+               sim.sedationState === 'ADMINISTERING' ? 'Pushing...' :
+               sim.sedationState === 'ONSET' ? 'Onset (~45s)...' :
+               sim.sedationState === 'ORDERED' ? 'Ordered...' :
+               'Sedate'}
             </button>
 
             <button

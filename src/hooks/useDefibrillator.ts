@@ -235,6 +235,10 @@ export function useDefibrillator(options: UseDefibrillatorOptions): UseDefibrill
   const deliverShock = useCallback(() => {
     const now = getSimulationTime();
 
+    // Capture current state values before updating
+    const currentEnergy = state.selectedEnergy;
+    const currentSyncMode = state.syncMode;
+
     setState(s => {
       const newState = machine.deliverShock(s, now);
 
@@ -245,9 +249,6 @@ export function useDefibrillator(options: UseDefibrillatorOptions): UseDefibrill
         syncMode: s.syncMode
       });
 
-      // Notify parent of shock
-      onShockDelivered(s.selectedEnergy, s.syncMode);
-
       // Complete shock after brief delay
       setTimeout(() => {
         setState(current => machine.completeShock(current));
@@ -255,7 +256,11 @@ export function useDefibrillator(options: UseDefibrillatorOptions): UseDefibrill
 
       return newState;
     });
-  }, [getSimulationTime, logAction, onShockDelivered]);
+
+    // Notify parent of shock AFTER setState (not inside it)
+    // This avoids "Cannot update component while rendering" warning
+    onShockDelivered(currentEnergy, currentSyncMode);
+  }, [getSimulationTime, logAction, onShockDelivered, state.selectedEnergy, state.syncMode]);
 
   // ============================================================================
   // Cleanup
