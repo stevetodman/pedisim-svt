@@ -413,6 +413,24 @@ await audio.playCry('scream');
 audio.silenceAlarms();
 ```
 
+### Simulation Integration
+
+Audio is fully integrated into `useSimulation.ts`:
+
+| Event | Audio Trigger |
+|-------|---------------|
+| Simulation start | `startSpO2Beep(220, 97, {isSVT: true})` + tachycardia alarm |
+| Vitals update | `updateSpO2(spo2)` - pitch changes with saturation |
+| SpO2 < 90% | `startSpO2Alarm('low')` |
+| SpO2 < 85% | `startSpO2Alarm('critical')` |
+| IV poke | `playCrySound('whimper'/'cry')` based on fear level |
+| IV success/fail | `playIVInsertionSound(success)` |
+| IO drilling | `playIOInsertionSound()` with drill + scream |
+| Sedation push | `playSedationSound()` |
+| Adenosine asystole | `startFlatline()` during EFFECT phase |
+| Failed adenosine | `playErrorTone()` + `playCrySound('cry')` |
+| Conversion success | `playSuccessChime()` + recovery heartbeat |
+
 ## Lily Avatar System
 
 Animated SVG avatar showing Lily's clinical state through visual feedback.

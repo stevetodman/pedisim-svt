@@ -369,8 +369,9 @@ export function useSimulation() {
     };
     setStateSnapshots([initialSnapshot]);
 
-    audioRef.current?.startHeartbeat(220, true);
-    audioRef.current?.startAlarm();
+    // Start SpO2-modulated heart beep (pitch drops with desaturation)
+    audioRef.current?.startSpO2Beep(220, 97, { isSVT: true });
+    audioRef.current?.startTachyAlarm();
 
     timerRef.current = setInterval(() => setElapsed(e => e + 100), 100);
 
@@ -419,12 +420,12 @@ export function useSimulation() {
     setLilyFear(2);
 
     audioRef.current?.stopAll();
-    audioRef.current?.playSuccess();
+    audioRef.current?.playSuccessChime();
 
     // Start heartbeat at a low rate initially, will increase with recovery
-    setTimeout(() => audioRef.current?.startHeartbeat(60, false), 500);
+    setTimeout(() => audioRef.current?.startSpO2Beep(60, 94, { isSVT: false }), 500);
     // Update to normal rate after recovery
-    setTimeout(() => audioRef.current?.startHeartbeat(90, false), 10000);
+    setTimeout(() => audioRef.current?.startSpO2Beep(90, 98, { isSVT: false }), 10000);
 
     addMessage('nurse', `Converting... ${nurseComment}`);
     setTimeout(() => addMessage('nurse', "Junctional escape... now sinus bradycardia... rate coming up nicely."), 3000);
@@ -721,13 +722,15 @@ export function useSimulation() {
       type: 'iv',
     });
 
-    // Lily's initial reaction
+    // Lily's initial reaction (with cry sound)
     setTimeout(() => {
       const reaction = attemptNum === 1
         ? getLilyIVReaction('poke', lilyFear)
         : getLilyIVReaction('second_poke', lilyFear);
       addMessage('lily', reaction);
       setLilyFear(f => Math.min(5, f + 0.5));
+      // Play cry based on fear level
+      audioRef.current?.playCrySound(lilyFear >= 4 ? 'cry' : 'whimper');
     }, 500);
 
     // Mark watching
@@ -771,6 +774,8 @@ export function useSimulation() {
       setIoAccessState('DRILLING');
       addMessage('nurse', getIONurseDialogue('drilling'));
       addMessage('lily', getLilyIOReaction('drilling'));
+      // Play IO drilling sound (includes scream)
+      audioRef.current?.playIOInsertionSound();
 
       // Start IO procedural effect (severe SpO2 drop, artifact)
       const ioEffect = getIOInsertionEffects();
@@ -1047,6 +1052,18 @@ export function useSimulation() {
           rr: newVitals.rr,
         });
 
+        // Update audio to reflect SpO2 changes (pitch drops with desaturation)
+        audioRef.current?.updateSpO2(adjustedSpO2);
+
+        // Trigger SpO2 alarm if low
+        if (adjustedSpO2 < 85) {
+          audioRef.current?.startSpO2Alarm('critical');
+        } else if (adjustedSpO2 < 90) {
+          audioRef.current?.startSpO2Alarm('low');
+        } else {
+          audioRef.current?.stopSpO2Alarm();
+        }
+
         // Update perfusion assessment
         const newPerfusion = calculatePerfusion(newStage, false, false);
         setPerfusion(newPerfusion);
@@ -1090,6 +1107,9 @@ export function useSimulation() {
           rr: recoveryVitals.rr,
         });
 
+        // Update audio for recovery vitals
+        audioRef.current?.updateSpO2(recoveryVitals.spo2);
+
         // Update perfusion with recovery
         const recoveryPerfusion = calculatePerfusion('compensated', false, true, timeSinceConversion);
         setPerfusion(recoveryPerfusion);
@@ -1127,6 +1147,7 @@ export function useSimulation() {
         addMessage('nurse', "Drawing up midazolam 1.8mg...");
       } else if (nextState === 'ADMINISTERING') {
         addMessage('nurse', "Pushing sedation now...");
+        audioRef.current?.playSedationSound();
       } else if (nextState === 'ONSET') {
         addMessage('lily', "Daddy... I feel... floaty...");
       } else if (nextState === 'SEDATED') {
@@ -1207,7 +1228,9 @@ export function useSimulation() {
             setRhythm('SINUS');
             setMarkAnxiety(2);
             setLilyFear(2);
-            audioRef.current?.playSuccess();
+            audioRef.current?.playSuccessChime();
+            // Start recovery heartbeat
+            setTimeout(() => audioRef.current?.startSpO2Beep(60, 94, { isSVT: false }), 500);
             addMessage('nurse', "Converting... there's sinus! Adenosine worked!");
             setTimeout(() => addMessage('lily', "The drum stopped! I feel... tired but better..."), 2000);
             setTimeout(() => addMessage('mark', "Oh thank god... is she okay now?"), 3500);
@@ -1220,10 +1243,11 @@ export function useSimulation() {
             setPhase('RUNNING');
             setRhythm('SVT');
             setMarkAnxiety(4);
-            audioRef.current?.playError();
+            audioRef.current?.playErrorTone();
+            audioRef.current?.playCrySound('cry'); // Lily crying after failed adenosine
             setTimeout(() => {
-              audioRef.current?.startHeartbeat(215, true);
-              audioRef.current?.startAlarm();
+              audioRef.current?.startSpO2Beep(215, 94, { isSVT: true });
+              audioRef.current?.startTachyAlarm();
             }, 200);
             addMessage('lily', "*crying* It still hurts! Make it stop!");
             setTimeout(() => addMessage('mark', "It didn't work?! What now?!"), 1000);
@@ -1270,7 +1294,8 @@ export function useSimulation() {
       setIvAttempts(prev => [...prev, attempt]);
 
       if (pendingIVOutcome.success) {
-        // SUCCESS!
+        // SUCCESS! Play IV success sound
+        audioRef.current?.playIVInsertionSound(true);
         setIvAccessState('SUCCESS');
         setIvAccess(true);
         setActionLog(prev => prev.map((a, i) =>
@@ -1285,7 +1310,8 @@ export function useSimulation() {
         }, 800);
 
       } else if (pendingIVOutcome.difficult) {
-        // Difficult access - offer IO choice
+        // Difficult access - offer IO choice. Play failed IV sound
+        audioRef.current?.playIVInsertionSound(false);
         setIvAccessState('DIFFICULT');
         setActionLog(prev => prev.map((a, i) =>
           i === prev.length - 1 && a.type === 'establish_iv'
@@ -1294,6 +1320,7 @@ export function useSimulation() {
         ));
         addMessage('nurse', getIVNurseDialogue('difficult', attemptNum, formattedSite, pendingIVOutcome.reason));
         addMessage('lily', getLilyIVReaction('failed', lilyFear));
+        audioRef.current?.playCrySound('cry'); // Cry on failed IV
         setLilyFear(f => Math.min(5, f + 0.5));
         setTimeout(() => {
           addMessage('mark', getMarkIVReaction('difficult', markAnxiety));
@@ -1302,13 +1329,15 @@ export function useSimulation() {
         }, 1000);
 
       } else {
-        // Failed but can retry
+        // Failed but can retry. Play failed IV sound
+        audioRef.current?.playIVInsertionSound(false);
         const availableSites = getAvailableSites([...ivAttempts, attempt]);
 
         if (availableSites.length === 0) {
           // No more sites - must go IO
           setIvAccessState('FAILED_ALL');
           addMessage('nurse', "Doctor, I've tried all the peripheral sites. We need to go IO.");
+          audioRef.current?.playCrySound('cry');
           setShowIOChoice(true);
         } else {
           setIvAccessState('FAILED_FIRST');
@@ -1319,6 +1348,7 @@ export function useSimulation() {
           ));
           addMessage('nurse', getIVNurseDialogue('failed', attemptNum, formattedSite, pendingIVOutcome.reason));
           addMessage('lily', getLilyIVReaction('failed', lilyFear));
+          audioRef.current?.playCrySound('cry'); // Cry on failed IV
           setLilyFear(f => Math.min(5, f + 0.5));
           setTimeout(() => {
             addMessage('mark', getMarkIVReaction('failed', markAnxiety));
