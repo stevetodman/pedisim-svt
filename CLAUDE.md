@@ -103,7 +103,7 @@ Without an API key, characters use scripted fallback responses (fully functional
 
 ## Testing
 
-**63 tests** covering the simulation kernel. Run with:
+**157 tests** covering the simulation kernel. Run with:
 
 ```bash
 npm run test        # Watch mode
@@ -116,11 +116,15 @@ npx vitest run      # Single run
 tests/
 ├── setup.ts                        # Fixtures, seeded random helpers
 └── kernel/
-    ├── doses.test.ts               # PALS dosing calculations (16 tests)
+    ├── doses.test.ts               # PALS dosing calculations (33 tests)
     ├── nurse.test.ts               # Safety validation layer (21 tests)
     ├── physiology.test.ts          # Intervention outcomes (20 tests)
+    ├── integration.test.ts         # Multi-intervention sequences (11 tests)
     └── evaluation/
-        └── causal.test.ts          # Causal chain verification (6 tests)
+        ├── causal.test.ts          # Causal chain verification (6 tests)
+        ├── counterfactual.test.ts  # "What if" analysis (21 tests)
+        ├── pivots.test.ts          # Decision point detection (18 tests)
+        └── timeline.test.ts        # Timeline reconstruction (27 tests)
 ```
 
 ### Reproducible Random
