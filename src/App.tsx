@@ -8,6 +8,7 @@ import { useDebrief } from './hooks/useDebrief';
 import { formatDoseAccuracy, getNurseCatchDescription } from './kernel/nurse';
 import { DebriefView, LoadingState, QuickSummary } from './components/debrief';
 import { ECGViewer } from './components/ecg-viewer';
+import { DefibrillatorPanel } from './components/defibrillator';
 import { checkAIMode } from './api/aiConfig';
 
 // ============================================================================
@@ -345,12 +346,11 @@ export default function App() {
   const [showFullDebrief, setShowFullDebrief] = useState(false);
   const [useEnhancedDebrief] = useState(true);
   const [adenosineDose, setAdenosineDose] = useState('1.85');
-  const [cardiovertDose, setCardiovertDose] = useState('9');
   const [showAdenosineInput, setShowAdenosineInput] = useState(false);
-  const [showCardiovertInput, setShowCardiovertInput] = useState(false);
   const [doctorInput, setDoctorInput] = useState('');
   const [aiModeEnabled, setAiModeEnabled] = useState<boolean | null>(null);
   const [showECG, setShowECG] = useState(false);
+  const [showDefib, setShowDefib] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -400,11 +400,6 @@ export default function App() {
   const handleAdenosine = () => {
     sim.giveAdenosine(parseFloat(adenosineDose));
     setShowAdenosineInput(false);
-  };
-
-  const handleCardiovert = () => {
-    sim.cardiovert(parseFloat(cardiovertDose));
-    setShowCardiovertInput(false);
   };
 
   const isRunning = sim.phase === 'RUNNING';
@@ -496,6 +491,46 @@ export default function App() {
         />
       )}
 
+      {/* Defibrillator Panel */}
+      {showDefib && (() => {
+        // Parse BP string to get systolic/diastolic
+        const bpParts = sim.vitals.bp.split('/');
+        const systolic = parseInt(bpParts[0]) || 92;
+        const diastolic = parseInt(bpParts[1]) || 64;
+
+        return (
+          <DefibrillatorPanel
+            patient={{
+              name: sim.patient.name,
+              age: `${sim.patient.age}yo`,
+              weight: sim.patient.weight,
+            }}
+            rhythm={sim.rhythm}
+            vitals={{
+              hr: sim.vitals.hr,
+              spo2: sim.vitals.spo2,
+              systolic,
+              diastolic,
+            }}
+            sedated={sim.sedated}
+            getSimulationTime={() => sim.elapsed}
+            onShockDelivered={(energy, _syncMode) => {
+              // Use the existing cardiovert function which handles the outcome
+              sim.cardiovert(energy);
+              // Close defibrillator panel after shock sequence completes
+              setTimeout(() => {
+                setShowDefib(false);
+              }, 2000);
+            }}
+            onClose={() => setShowDefib(false)}
+            onNurseMessage={(_message) => {
+              // Nurse messages are handled by useSimulation internally
+              // This is just for additional feedback if needed
+            }}
+          />
+        );
+      })()}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -582,7 +617,7 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => { setShowAdenosineInput(!showAdenosineInput); setShowCardiovertInput(false); }}
+              onClick={() => setShowAdenosineInput(!showAdenosineInput)}
               disabled={!isRunning}
               className="w-full p-1.5 rounded bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 disabled:opacity-30 text-[10px] font-bold text-amber-400"
             >
@@ -610,24 +645,12 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => { setShowCardiovertInput(!showCardiovertInput); setShowAdenosineInput(false); }}
+              onClick={() => setShowDefib(true)}
               disabled={!isRunning}
               className="w-full p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 disabled:opacity-30 text-[10px] font-bold text-red-400"
             >
-              Cardiovert
+              ⚡ Cardiovert
             </button>
-            {showCardiovertInput && (
-              <div className="flex gap-1">
-                <input
-                  type="number"
-                  step="5"
-                  value={cardiovertDose}
-                  onChange={(e) => setCardiovertDose(e.target.value)}
-                  className="flex-1 bg-black border border-red-500/50 rounded px-2 py-1 text-red-300 font-mono text-[10px] w-full"
-                />
-                <button onClick={handleCardiovert} className="bg-red-600 px-2 py-1 rounded text-[10px] font-bold">GO</button>
-              </div>
-            )}
 
             <div className="border-t border-white/10 my-1" />
 

@@ -252,3 +252,101 @@ After successful conversion from SVT, participants can order a follow-up ECG tha
 - `orderFollowUpECG()` action in `useSimulation.ts`
 - Amber "Get Follow-up ECG" button appears only after CONVERTED phase
 - Interpretation: "WOLFF-PARKINSON-WHITE PATTERN - REFER TO PEDIATRIC CARDIOLOGY"
+
+## Defibrillator System
+
+A realistic Zoll-style defibrillator/cardioverter for teaching synchronized cardioversion. Access via "⚡ Cardiovert" button during SVT.
+
+### Architecture
+
+```
+src/kernel/defibrillator/           # Deterministic state machine
+├── types.ts                        # DeviceState, PadState, DefibrillatorState, DefibAction
+├── machine.ts                      # 14 state transitions + validation helpers
+└── index.ts                        # Barrel export
+
+src/hooks/useDefibrillator.ts       # React state + animations + audio coordination
+
+src/components/defibrillator/       # UI presentation layer
+├── DefibrillatorPanel.tsx          # Main modal container
+├── DefibScreen.tsx                 # Canvas ECG with sync markers
+├── DefibControls.tsx               # SYNC/CHARGE/DISARM/SHOCK buttons
+├── ChargeBar.tsx                   # Animated charging progress
+├── PadPlacement.tsx                # A-P vs A-L pad position selection
+├── ClearConfirmation.tsx           # Hold-to-shock safety dialog
+└── index.ts                        # Barrel export
+```
+
+### State Machine
+
+```
+OFF → STANDBY → ANALYZING (4s) → SHOCK_ADVISED → CHARGING → READY → DISCHARGING → STANDBY
+         │                              │
+         └── Pads: NOT_ATTACHED → ATTACHING → GOOD_CONTACT/POOR_CONTACT
+```
+
+**Device States**: `OFF`, `STANDBY`, `ANALYZING`, `SHOCK_ADVISED`, `CHARGING`, `READY`, `DISCHARGING`
+
+**Pad States**: `NOT_ATTACHED`, `ATTACHING`, `POOR_CONTACT`, `GOOD_CONTACT`
+
+### User Workflow (7 Steps)
+
+1. **Open device**: Click "⚡ Cardiovert" → DefibrillatorPanel modal opens
+2. **Attach pads**: Select position (A-P recommended for pediatric, A-L alternative)
+3. **Rhythm analysis**: 4-second automated analysis → "SHOCKABLE - SVT DETECTED"
+4. **Select energy**: Use ◄ ► buttons, shows "0.5 J/kg = 9J" recommendation
+5. **Charge**: Rising 200→2500Hz audio sweep, charge bar fills (1.5-4s based on energy)
+6. **Clear confirmation**: "Everyone Clear" dialog with hold-to-shock button (500ms)
+7. **Deliver shock**: 92% success → Converts to sinus, or failed → increase energy
+
+### Nurse Safety Integration
+
+The nurse provides warnings for common errors:
+
+| Condition | Nurse Message |
+|-----------|---------------|
+| SYNC OFF for SVT | "Doctor, you're in defib mode. SVT needs synchronized cardioversion." |
+| Patient NOT sedated | "Doctor, she's awake. Cardioversion is extremely painful." |
+| Energy >1.5 J/kg first shock | "That's X J/kg - we usually start at 0.5 for stable SVT." |
+| Pads not attached | "Doctor, we need to place the pads first." |
+
+### Audio Features
+
+All sounds procedurally generated via Web Audio API in `src/audio/index.ts`:
+
+- **Charging sweep**: Sawtooth 200→2500Hz + octave harmonic (30% mix)
+- **Ready tone**: Pulsing 880Hz (150ms on, 300ms off)
+- **Sync marker**: 1000Hz click (30ms) on R-wave detection
+- **Shock delivery**: White noise (10ms) + 80Hz thump + 30Hz rumble
+- **Analyzing**: 600Hz beeps every 800ms during rhythm analysis
+
+### Pediatric Energy Options
+
+PALS 2020 guidelines for synchronized cardioversion:
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Initial dose | 0.5-1 J/kg | 9-18J for 18.5kg |
+| Repeat dose | 1-2 J/kg | 18-37J for 18.5kg |
+| Max pediatric | 200J | Device limit |
+
+**Available energies**: 5, 10, 15, 20, 30, 50, 70, 100, 150, 200J
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `S` | Toggle SYNC mode |
+| `←` / `→` | Decrease/increase energy |
+| `Esc` | Close panel (if not charging) |
+
+### Sync Mode
+
+When SYNC is ON (green indicator):
+- Orange ▼ markers appear on R-waves in the ECG display
+- Shock delivery is synchronized to the next R-wave
+- Essential for SVT to avoid R-on-T phenomenon
+
+When SYNC is OFF (defib mode):
+- Immediate shock delivery (for VF/pulseless VT)
+- Nurse will warn if used inappropriately for SVT

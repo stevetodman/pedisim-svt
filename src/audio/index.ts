@@ -29,6 +29,12 @@ export class AudioEngine {
   private alarmGain: GainNode | null = null;
   private alarmPulseInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Defibrillator-specific
+  private chargingOsc: OscillatorNode | null = null;
+  private chargingGain: GainNode | null = null;
+  private chargingHarmonicOsc: OscillatorNode | null = null;
+  private readyToneInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(config: Partial<AudioEngineConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -323,6 +329,193 @@ export class AudioEngine {
   }
 
   // ============================================================================
+  // REALISTIC DEFIBRILLATOR SOUNDS
+  // ============================================================================
+
+  /**
+   * Start realistic charging whine with progress callback
+   * Frequency sweep from 200Hz to 2500Hz with harmonic overtone
+   */
+  startRealisticCharging(
+    targetEnergy: number,
+    onProgress: (percent: number) => void
+  ): Promise<void> {
+    if (!this.ctx || !this.masterGain) return Promise.resolve();
+
+    this.stopRealisticCharging();
+
+    // Calculate charge time based on energy (1.5s to 4s)
+    const duration = 1500 + (targetEnergy / 200) * 2500;
+    const durationSec = duration / 1000;
+
+    // Main charging oscillator
+    this.chargingOsc = this.ctx.createOscillator();
+    this.chargingGain = this.ctx.createGain();
+
+    this.chargingOsc.connect(this.chargingGain);
+    this.chargingGain.connect(this.masterGain);
+
+    this.chargingOsc.type = 'sawtooth';
+    const startTime = this.ctx.currentTime;
+    const endTime = startTime + durationSec;
+
+    // Frequency sweep 200Hz → 2500Hz
+    this.chargingOsc.frequency.setValueAtTime(200, startTime);
+    this.chargingOsc.frequency.exponentialRampToValueAtTime(2500, endTime);
+
+    // Volume ramp 0.08 → 0.15
+    this.chargingGain.gain.setValueAtTime(0.08, startTime);
+    this.chargingGain.gain.linearRampToValueAtTime(0.15, endTime);
+
+    // Harmonic overtone (octave up, 30% mix)
+    this.chargingHarmonicOsc = this.ctx.createOscillator();
+    const harmonicGain = this.ctx.createGain();
+
+    this.chargingHarmonicOsc.connect(harmonicGain);
+    harmonicGain.connect(this.masterGain);
+
+    this.chargingHarmonicOsc.type = 'sawtooth';
+    this.chargingHarmonicOsc.frequency.setValueAtTime(400, startTime);
+    this.chargingHarmonicOsc.frequency.exponentialRampToValueAtTime(5000, endTime);
+    harmonicGain.gain.value = 0.03;
+
+    this.chargingOsc.start();
+    this.chargingHarmonicOsc.start();
+
+    // Progress tracking
+    const progressStart = Date.now();
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - progressStart;
+      const percent = Math.min(100, (elapsed / duration) * 100);
+      onProgress(percent);
+      if (percent >= 100) {
+        clearInterval(progressInterval);
+      }
+    }, 50);
+
+    return new Promise(resolve => {
+      setTimeout(() => {
+        this.stopRealisticCharging();
+        resolve();
+      }, duration);
+    });
+  }
+
+  /**
+   * Stop charging sound
+   */
+  stopRealisticCharging(): void {
+    if (this.chargingOsc) {
+      try { this.chargingOsc.stop(); } catch {}
+      this.chargingOsc.disconnect();
+      this.chargingOsc = null;
+    }
+    if (this.chargingGain) {
+      this.chargingGain.disconnect();
+      this.chargingGain = null;
+    }
+    if (this.chargingHarmonicOsc) {
+      try { this.chargingHarmonicOsc.stop(); } catch {}
+      this.chargingHarmonicOsc.disconnect();
+      this.chargingHarmonicOsc = null;
+    }
+  }
+
+  /**
+   * Start ready tone (pulsing 880Hz beep when charged)
+   */
+  startReadyTone(): void {
+    this.stopReadyTone();
+
+    this.readyToneInterval = setInterval(() => {
+      this.playBeep({ frequency: 880, duration: 0.15, volume: 0.2 });
+    }, 300);
+  }
+
+  /**
+   * Stop ready tone
+   */
+  stopReadyTone(): void {
+    if (this.readyToneInterval) {
+      clearInterval(this.readyToneInterval);
+      this.readyToneInterval = null;
+    }
+  }
+
+  /**
+   * Play realistic shock discharge sound
+   * Combines white noise click + low frequency thump + body artifact
+   */
+  playRealisticShock(): void {
+    if (!this.ctx || !this.masterGain) return;
+
+    const now = this.ctx.currentTime;
+
+    // 1. White noise click (10ms)
+    const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.01, this.ctx.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < noiseData.length; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * 0.5;
+    }
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    const noiseGain = this.ctx.createGain();
+    noiseSource.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseGain.gain.setValueAtTime(0.5, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.01);
+    noiseSource.start(now);
+    noiseSource.stop(now + 0.01);
+
+    // 2. Low frequency thump (80Hz, 100ms decay)
+    const thumpOsc = this.ctx.createOscillator();
+    const thumpGain = this.ctx.createGain();
+    thumpOsc.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+    thumpOsc.type = 'sine';
+    thumpOsc.frequency.value = 80;
+    thumpGain.gain.setValueAtTime(0.5, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    thumpOsc.start(now);
+    thumpOsc.stop(now + 0.15);
+
+    // 3. Body artifact rumble (30Hz, 50ms)
+    const rumbleOsc = this.ctx.createOscillator();
+    const rumbleGain = this.ctx.createGain();
+    rumbleOsc.connect(rumbleGain);
+    rumbleGain.connect(this.masterGain);
+    rumbleOsc.type = 'sine';
+    rumbleOsc.frequency.value = 30;
+    rumbleGain.gain.setValueAtTime(0.2, now);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+    rumbleOsc.start(now);
+    rumbleOsc.stop(now + 0.05);
+  }
+
+  /**
+   * Play sync marker beep (quick beep on R-wave detection)
+   */
+  playSyncMarker(): void {
+    this.playBeep({ frequency: 1000, duration: 0.03, volume: 0.1 });
+  }
+
+  /**
+   * Play analyzing rhythm sound (beeps while analyzing)
+   */
+  async playAnalyzingSequence(durationMs: number = 4000): Promise<void> {
+    const intervalId = setInterval(() => {
+      this.playBeep({ frequency: 600, duration: 0.1, volume: 0.15 });
+    }, 800);
+
+    return new Promise(resolve => {
+      setTimeout(() => {
+        clearInterval(intervalId);
+        resolve();
+      }, durationMs);
+    });
+  }
+
+  // ============================================================================
   // COMPLEX SEQUENCES
   // ============================================================================
 
@@ -436,6 +629,8 @@ export class AudioEngine {
     this.stopHeartBeep();
     this.stopTachyAlarm();
     this.stopFlatline();
+    this.stopRealisticCharging();
+    this.stopReadyTone();
   }
 
   /**
