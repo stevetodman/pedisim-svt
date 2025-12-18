@@ -105,7 +105,7 @@ Without an API key, characters use scripted fallback responses (fully functional
 
 ## Testing
 
-**63 tests** covering the simulation kernel. Run with:
+**157 tests** covering the simulation kernel. Run with:
 
 ```bash
 npm run test        # Watch mode
@@ -118,11 +118,15 @@ npx vitest run      # Single run
 tests/
 ├── setup.ts                        # Fixtures, seeded random helpers
 └── kernel/
-    ├── doses.test.ts               # PALS dosing calculations (16 tests)
+    ├── doses.test.ts               # PALS dosing calculations (33 tests)
     ├── nurse.test.ts               # Safety validation layer (21 tests)
     ├── physiology.test.ts          # Intervention outcomes (20 tests)
+    ├── integration.test.ts         # Full scenario integration (11 tests)
     └── evaluation/
-        └── causal.test.ts          # Causal chain verification (6 tests)
+        ├── causal.test.ts          # Causal chain verification (6 tests)
+        ├── counterfactual.test.ts  # What-if analysis (21 tests)
+        ├── pivots.test.ts          # Pivot point detection (18 tests)
+        └── timeline.test.ts        # Timeline reconstruction (27 tests)
 ```
 
 ### Reproducible Random
@@ -220,3 +224,31 @@ src/components/ecg-viewer/         # UI presentation layer
 - **P waves**: Hidden (no visible P)
 - **Precordial voltages**: Higher than adult (thinner chest wall)
 - **T wave inversion**: Normal in V1 for children
+
+### WPW Follow-Up ECG
+
+After successful conversion from SVT, participants can order a follow-up ECG that reveals the underlying **Wolff-Parkinson-White (WPW) syndrome** - the clinical cause of Lily's SVT.
+
+**Clinical Teaching Point**: WPW cannot be diagnosed during SVT because:
+- During orthodromic AVRT, the accessory pathway conducts retrograde only
+- No delta wave is visible during the tachycardia
+- Only in sinus rhythm does the pre-excitation pattern appear
+- **Follow-up ECG after SVT conversion is essential clinical practice**
+
+**WPW Type A Morphology (Left Lateral Pathway)**:
+
+| Finding | Value | Clinical Significance |
+|---------|-------|----------------------|
+| PR interval | ~80ms | Short (normal 120-180ms for 5yo) |
+| Delta wave | 40ms duration | Slurred QRS upstroke |
+| QRS duration | ~110ms | Wide (normal 60-90ms) |
+| Delta in V1 | Positive | Type A = left-sided pathway |
+| T waves | Discordant | Secondary repolarization changes |
+
+**Implementation**:
+- `WPW_SINUS` rhythm type in `types.ts`
+- `WPW_SINUS_MORPHOLOGY` with delta waves for all 15 leads
+- `deltaWaveShape()` function for characteristic slurred upstroke
+- `orderFollowUpECG()` action in `useSimulation.ts`
+- Amber "Get Follow-up ECG" button appears only after CONVERTED phase
+- Interpretation: "WOLFF-PARKINSON-WHITE PATTERN - REFER TO PEDIATRIC CARDIOLOGY"
